@@ -78,7 +78,7 @@ function buildSkier(scene, seed) {
   const body = new THREE.Group();          // 下蹲偏移 / 摔倒翻滚
   root.add(body);
 
-  const HIP_Y = 0.88, HIP_X = 0.115;
+  const HIP_Y = 0.88, HIP_X = 0.18;
   function buildLeg(side) {
     const hip = new THREE.Group();
     hip.position.set(side * HIP_X, HIP_Y, 0);
@@ -147,7 +147,8 @@ function buildSkier(scene, seed) {
   const zipper = box(0.026, 0.30, 0.012, MAT.jacketDark);
   zipper.position.set(0, 0.19, -0.158);
   zipper.rotation.x = 0.06;
-  const pack = box(0.25, 0.31, 0.15, MAT.pack);
+  const pack = capsule(0.12, 0.14, MAT.pack, 10);
+  pack.scale.set(1.04, 1, 0.68);
   pack.position.set(0, 0.22, 0.155);
   const bedroll = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.058, 0.27, 10), MAT.bedroll);
   bedroll.rotation.z = Math.PI / 2;
@@ -156,6 +157,9 @@ function buildSkier(scene, seed) {
     tGeo(new THREE.SphereGeometry(0.078, 10, 8), -0.155, 0.36, 0, 0),
     tGeo(new THREE.SphereGeometry(0.078, 10, 8), 0.155, 0.36, 0, 0),
   ], MAT.jacketDark);
+  const packBand = box(0.235, 0.024, 0.15, MAT.jacketDark);
+  packBand.position.set(0, 0.19, 0.18);
+  torso.add(packBand);
   torso.add(chestLow, chestTop, zipper, pack, bedroll, shoulders);
 
   // 头部
@@ -231,19 +235,32 @@ function buildSkier(scene, seed) {
   let crash = null;          // 摔倒运动状态
   const freeSkis = [];       // 飞出的雪板
 
+  const tails = [new THREE.Vector3(), new THREE.Vector3()];
+  const groundPoint = new THREE.Vector3();
+  const sample = new THREE.Vector3();
+  const legs = [legL, legR];
   function update(st, dt, time) {
-    root.position.set(st.x, st.y, st.z);   // 跟随物理状态
     if (st.crashed) { updateCrash(dt); return; }
-    const c = U.clamp(0.24 + st.compression * 0.55 + st.tuck * 0.5, 0, 1.15);
+    root.position.set(st.x, st.y, st.z);
+    const cs = Math.cos(st.heading), sn = Math.sin(st.heading);
+    const tip = terrainHeight(st.x - sn * 0.82, st.z - cs * 0.82, seed);
+    const tail = terrainHeight(st.x + sn * 0.82, st.z + cs * 0.82, seed);
+    const right = terrainHeight(st.x + cs * HIP_X, st.z - sn * HIP_X, seed);
+    const left = terrainHeight(st.x - cs * HIP_X, st.z + sn * HIP_X, seed);
+    root.position.y = (left + right) * 0.5;
+    root.rotation.set(Math.atan2(tip - tail, 1.64), st.heading,
+      Math.atan2(right - left, 2 * HIP_X), 'YXZ');
+    const c = U.clamp(0.44 + st.compression * 0.55 + st.tuck * 0.5, 0, 1.15);
     const thighPitch = 0.18 + c * 0.62;
     const kneePitch = 0.22 + c * 1.6;
-    const bootPitch = 0.04 + c * 0.98;
+    const bootPitch = kneePitch - thighPitch;
     // 腿部链路缩短量 = 髋部下坠量（保证雪板贴雪）
     const legReach = 0.40 * Math.cos(thighPitch) + 0.40 * Math.cos(kneePitch - thighPitch);
     body.position.y = -(0.80 - legReach);
     body.rotation.set(0, 0, 0);
 
-    for (const leg of [legL, legR]) {
+    for (const leg of legs) {
+      leg.hip.position.set(leg === legL ? -HIP_X : HIP_X, HIP_Y, 0);
       leg.hip.rotation.x = -thighPitch;
       leg.knee.rotation.x = kneePitch;
       leg.bootG.rotation.x = -bootPitch;
@@ -255,11 +272,24 @@ function buildSkier(scene, seed) {
     legL.ski.rotation.y = -0.05;
     legR.ski.rotation.y = 0.05;
 
-    // 航向 + 侧倾（rotation 顺序 YZX：先朝向再滚转）
-    root.rotation.order = 'YZX';
-    root.rotation.y = st.heading;
-    root.rotation.z = st.lean;
-
+    body.position.x = -st.lean * 0.20;
+    for (let i = 0; i < legs.length; i++) {
+      const leg = legs[i];
+      leg.ski.updateWorldMatrix(true, false);
+      leg.ski.localToWorld(sample.set(0, -0.024, 0.05));
+      // Correct both height and lateral offset in hip-parent space, keeping boots planted.
+      groundPoint.copy(sample);
+      groundPoint.x -= cs * body.position.x;
+      groundPoint.z += sn * body.position.x;
+      groundPoint.y = terrainHeight(groundPoint.x, groundPoint.z, seed) + 0.008;
+      body.worldToLocal(groundPoint);
+      body.worldToLocal(sample);
+      leg.hip.position.add(groundPoint.sub(sample));
+      leg.ski.updateWorldMatrix(true, false);
+      leg.ski.localToWorld(tails[i].set(0, -0.018, 0.82));
+      tails[i].y = terrainHeight(tails[i].x, tails[i].z, seed) + 0.016;
+    }
+    torso.rotation.z = st.lean * 0.82;
     // 躯干反弓（胸朝坡下、肩指向弯外）+ 前倾
     torso.rotation.y = st.steer * 0.4;
     torso.rotation.x = -(0.14 + st.tuck * 0.34 + c * 0.22);
@@ -268,7 +298,7 @@ function buildSkier(scene, seed) {
 
     // 手臂：低速平衡展开 → 高速收拢抱杖
     const t = st.tuck;
-    const spread = 1.02 - t * 0.62;
+    const spread = 0.70 - t * 0.39;
     armL.arm.rotation.z = -spread;
     armR.arm.rotation.z = spread;
     armL.arm.rotation.x = -(0.12 + t * 0.42);
@@ -330,19 +360,20 @@ function buildSkier(scene, seed) {
   function updateCrash(dt) {
     if (!crash) return;
     crash.vel.y -= 9.81 * dt;
-    body.position.addScaledVector(crash.vel, dt);
+    root.localToWorld(groundPoint.copy(body.position));
+    groundPoint.addScaledVector(crash.vel, dt);
+    const floor = terrainHeight(groundPoint.x, groundPoint.z, seed) + 0.25;
     body.rotation.x += crash.ang.x * dt;
     body.rotation.y += crash.ang.y * dt;
     body.rotation.z += crash.ang.z * dt;
     // 地面反弹衰减
-    const gy = terrainHeight(root.position.x, root.position.z, seed);
-    const floor = Math.max(gy, gy) ;
-    if (body.position.y < floor + 0.25) {
-      body.position.y = floor + 0.25;
+    if (groundPoint.y < floor) {
+      groundPoint.y = floor;
       crash.vel.y = Math.abs(crash.vel.y) * 0.25;
       crash.vel.x *= 0.82; crash.vel.z *= 0.82;
       crash.ang.multiplyScalar(0.86);
     }
+    body.position.copy(root.worldToLocal(groundPoint));
     // 飞出的雪板
     for (const fs of freeSkis) {
       fs.vel.y -= 9.81 * dt;
@@ -360,7 +391,9 @@ function buildSkier(scene, seed) {
     }
   }
 
-  function reset() {
+  function reset(newSeed = seed) {
+    seed = newSeed;
+    AN.polePhase = AN.vibT = 0;
     crash = null;
     body.position.set(0, 0, 0);
     body.rotation.set(0, 0, 0);
@@ -374,5 +407,5 @@ function buildSkier(scene, seed) {
     freeSkis.length = 0;
   }
 
-  return { root, body, update, startCrash, reset, MAT };
+  return { root, body, tails, update, startCrash, reset, MAT };
 }

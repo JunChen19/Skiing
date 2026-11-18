@@ -3,7 +3,7 @@
 //   · 非均匀网格——走廊内 ~0.9m/格（精细），两侧堤外 ~3m/格（省资源）
 //   · 法线用网格高度差分计算（块边界用解析差分保证无缝）
 //   · 生成任务按行切片、分帧推进（update(ms) 预算制），彻底消除重建卡顿
-//   · 材质注入雪面闪光 + 微细法线扰动 + 冷调菲涅尔
+//   · 雪面使用风纹、压雪道配色和板下接触阴影
 'use strict';
 
 const terrainTimeUniform = { value: 0 };
@@ -17,17 +17,18 @@ function makeTerrain(scene, seed) {
   const colX = new Float32Array(COLS);
   for (let ix = 0; ix < COLS; ix++) {
     const t = -1 + (2 * ix) / W_SEG;
-    colX[ix] = Math.sign(t) * Math.pow(Math.abs(t), 1.55) * W_HALF;
+    colX[ix] = Math.sign(t) * (Math.pow(Math.abs(t), 1.55) * W_HALF + 240 * Math.pow(Math.abs(t), 12));
   }
 
   // ---- 材质 ----
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.5,
+    roughness: 0.84,
     metalness: 0.0,
   });
+  const contact = { value: new THREE.Vector4(0, 0, 0, 1) };
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = terrainTimeUniform;
+    shader.uniforms.uContact = contact;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -35,28 +36,16 @@ function makeTerrain(scene, seed) {
       .replace('#include <common>', [
         '#include <common>',
         'varying vec3 vWP;',
-        'uniform float uTime;',
-        'float sphHash(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }',
+        'uniform vec4 uContact;',
       ].join('\n'))
-      .replace('#include <dithering_fragment>', [
-        '{',
-        '  vec3 cell = floor(vWP * 6.0);',
-        // 微细法线扰动：雪面颗粒起伏感
-        '  vec3 mj = vec3(sphHash(cell + 7.1), sphHash(cell + 8.3), sphHash(cell + 9.7)) - 0.5;',
-        '  normal = normalize(normal + mj * 0.10);',
-        // 闪光晶粒
-        '  float tw = sphHash(cell + floor(uTime * 3.0) * 0.37);',
-        '  if (tw > 0.9958) {',
-        '    vec3 vd = normalize(cameraPosition - vWP);',
-        '    vec3 jitterN = normalize(normal + vec3(sphHash(cell + 1.7) - 0.5, sphHash(cell + 2.3) - 0.5, sphHash(cell + 3.1) - 0.5) * 0.3);',
-        '    float glint = pow(max(dot(vd, jitterN), 0.0), 26.0);',
-        '    gl_FragColor.rgb += vec3(1.5, 1.38, 1.15) * glint * 1.35;',
-        '  }',
-        '  vec3 vd2 = normalize(cameraPosition - vWP);',
-        '  float fres = pow(1.0 - max(dot(vd2, normal), 0.0), 3.0);',
-        '  gl_FragColor.rgb += vec3(0.35, 0.5, 0.75) * fres * 0.10;',
-        '}',
-        '#include <dithering_fragment>',
+      .replace('#include <color_fragment>', [
+        '#include <color_fragment>',
+        'vec2 offset = vWP.xz - uContact.xy;',
+        'vec2 local = vec2(dot(offset, vec2(uContact.w, -uContact.z)), dot(offset, uContact.zw));',
+        'float contactShade = exp(-dot(local * vec2(2.9, 1.3), local * vec2(2.9, 1.3)));',
+        'float wind = sin(vWP.x * 2.8 + vWP.z * 0.67 + sin(vWP.z * 0.17) * 2.0);',
+        'float nearDetail = 1.0 - smoothstep(12.0, 62.0, length(cameraPosition - vWP));',
+        'diffuseColor.rgb *= (1.0 + 0.014 * wind * nearDetail) * (1.0 - contactShade * 0.32);',
       ].join('\n'));
   };
 
@@ -65,6 +54,7 @@ function makeTerrain(scene, seed) {
   const COL_SNOW_BLUE = new THREE.Color('#c9dcee').convertSRGBToLinear();
   const COL_ROCK = new THREE.Color('#8d857b').convertSRGBToLinear();
   const COL_ROCK_DARK = new THREE.Color('#6e675f').convertSRGBToLinear();
+  const laneSample = {};
   const tmpCol = new THREE.Color();
   const nrm = new THREE.Vector3();
 
@@ -153,6 +143,7 @@ function makeTerrain(scene, seed) {
     const zTop = -job.k * L;
     const z = zTop - (iz / Z_SEG) * L;
     const base = iz * COLS;
+    const lane = courseAt(-z, seed, laneSample);
     const zUp = zTop - ((iz - 1) / Z_SEG) * L;
     const zDn = zTop - ((iz + 1) / Z_SEG) * L;
     for (let ix = 0; ix < COLS; ix++) {
@@ -174,6 +165,9 @@ function makeTerrain(scene, seed) {
       const x = colX[ix];
       const scoured = 0.5 + 0.5 * fbm(x * 0.11, z * 0.11, 2, seed + 3);
       tmpCol.copy(COL_SNOW).lerp(COL_SNOW_BLUE, scoured * 0.4);
+      const pathDist = Math.min(Math.abs(x - lane.x) / lane.width, lane.shortcut ? Math.abs(x) / 2.2 : Infinity);
+      const groomed = 1 - U.smoothstep(0.65, 1.35, pathDist);
+      tmpCol.lerp(COL_SNOW_BLUE, (1 - groomed) * 0.48);
       const rockMix = U.smoothstep(0.8, 0.6, ny) * (0.55 + 0.45 * fbm(x * 0.13 + 5, z * 0.13, 2, seed + 17));
       if (rockMix > 0.001) {
         tmpCol.lerp(COL_ROCK, rockMix).lerp(COL_ROCK_DARK, rockMix * 0.4);
@@ -212,6 +206,7 @@ function makeTerrain(scene, seed) {
 
   function reset(newSeed) {
     seed = newSeed;
+    for (const job of buildQueue) pool.push(job.c);
     buildQueue.length = 0;
     if (activeJob) { pool.push(activeJob.c); activeJob = null; }
     for (const c of chunks.values()) { c.mesh.visible = false; pool.push(c); }
@@ -219,8 +214,15 @@ function makeTerrain(scene, seed) {
     ensure(0);
   }
 
+  function finishNearest() {
+    if (!buildQueue.length) return;
+    const job = buildQueue.shift();
+    while (!stepOneRow(job)) { /* Complete the starting tile before showing the slope. */ }
+    finishJob(job);
+  }
+
   return {
-    ensure,
+    contact, finishNearest, ensure,
     update,
     reset,
     mat,

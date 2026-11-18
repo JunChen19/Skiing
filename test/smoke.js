@@ -90,6 +90,61 @@ const testCode = `
   out.bandsChecked = bandsChecked > 8;
   out.gapGuaranteed = gapOk && bandsChecked > 8;
 
+  // Follow the generated line using the real steering limits. Check both forks
+  // from the starting speed and from a near-terminal-speed late-game entry.
+  let routeClear = true, gapMax = 0, slopeOK = true, colorsOK = true;
+  for (const seed of [7, 42, 101, 2026]) {
+    const scene = new THREE.Scene();
+    const forest = makeTrees(scene, seed);
+    for (const start of [0, sectorDistance(13, 0)]) {
+      const end = sectorDistance(sectorAt(start) + 1, 0);
+      forest.syncChunks(Math.floor(start / CFG.CHUNK_LEN), Math.ceil(end / CFG.CHUNK_LEN));
+      forest.rebuildInstances(-start);
+      scene.traverse(mesh => {
+        if (mesh.instanceColor) colorsOK &&= mesh.instanceColor.count >= mesh.count;
+      });
+      for (const cut of [false, true]) {
+        const run = makePhysics(seed), st = run.st, lane = {};
+        st.z = -start; st.dist = start;
+        st.y = terrainHeight(st.x, st.z, seed);
+        if (start > 0) { st.vz = -35; st.speed = 35; }
+        for (let tick = 0; tick < 9000 && st.dist < end; tick++) {
+          const ahead = U.clamp(st.speed * 0.46, 5, 15);
+          courseAt(st.dist + ahead, seed, lane);
+          const target = cut && lane.shortcut ? 0 : lane.x;
+          const heading = -Math.atan2(target - st.x, ahead);
+          run.step(1 / 120, U.clamp((st.heading - heading) * 4.2, -1, 1));
+          for (const tree of forest.nearTrees(st.z)) {
+            if (Math.hypot(tree.x - st.x, tree.z - st.z) < tree.r + 0.42) routeClear = false;
+          }
+        }
+        routeClear &&= st.dist >= end;
+      }
+    }
+    for (let z = -6000; z > -7000; z -= 5) {
+      const drop = terrainHeight(0, z, seed) - terrainHeight(0, z - 5, seed);
+      slopeOK &&= drop > 0 && drop < 5 * Math.tan(Math.PI / 6);
+    }
+    const actor = buildSkier(new THREE.Scene(), seed);
+    const bases = [];
+    actor.root.traverse(mesh => { if (mesh.material === actor.MAT.skiBase) bases.push(mesh); });
+    const run = makePhysics(seed), point = new THREE.Vector3();
+    for (let tick = 0; tick < 1200; tick++) {
+      run.step(1 / 120, Math.sin(tick / 80) * 0.4);
+      if (tick % 2) continue;
+      actor.update(run.st, 1 / 60, tick / 120);
+      actor.root.updateMatrixWorld(true);
+      for (const base of bases) {
+        base.localToWorld(point.set(0, -0.006, 0));
+        gapMax = Math.max(gapMax, Math.abs(point.y - terrainHeight(point.x, point.z, seed)));
+      }
+    }
+  }
+  out.connectedRouteAtSpeed = routeClear;
+  out.groundedSkis = gapMax < 0.03;
+  out.farSlopeBounded = slopeOK;
+  out.allInstancesHaveColors = colorsOK;
+
   // ---- D. 碰撞几何 ----
   const t0 = treesMod.nearTrees(-800)[0];
   if (t0) {

@@ -46,7 +46,7 @@ const CFG = {
   // 摄像机
   CAM_BACK: 8.6,
   CAM_UP: 3.3,
-  CAM_AHEAD: 6.5,
+  CAM_AHEAD: 15,
   CAM_FOV_BASE: 62,
   CAM_FOV_SPEED: 0.09,
 

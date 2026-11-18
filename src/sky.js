@@ -14,8 +14,8 @@ function makeSky(scene, seed) {
     uniforms: {
       uSunDir: { value: sunDir },
       uZenith: { value: new THREE.Color('#1d4b7e').convertSRGBToLinear() },
-      uMid:    { value: new THREE.Color('#6d94b8').convertSRGBToLinear() },
-      uHorizon:{ value: new THREE.Color('#eccda4').convertSRGBToLinear() },
+      uMid:    { value: new THREE.Color('#89b4cf').convertSRGBToLinear() },
+      uHorizon:{ value: new THREE.Color('#dce7ec').convertSRGBToLinear() },
       uSunCol: { value: new THREE.Color('#fff3d6').convertSRGBToLinear() },
     },
     vertexShader: `
@@ -83,51 +83,100 @@ function makeSky(scene, seed) {
   const rngC = mulberry32(seed + 31);
   for (let i = 0; i < 8; i++) {
     const m = new THREE.SpriteMaterial({
-      map: cloudTex, transparent: true, opacity: 0.5, depthWrite: false, fog: false,
+      map: cloudTex, transparent: true, opacity: 0.25, depthWrite: false, fog: false,
     });
     const s = new THREE.Sprite(m);
     const sc = 150 + rngC() * 220;
-    s.scale.set(sc, sc * 0.42, 1);
+    s.scale.set(sc, sc * 0.23, 1);
     s.position.set((rngC() - 0.5) * 1300, 110 + rngC() * 130, -120 - rngC() * 950);
     s.renderOrder = -90;
     cloudGroup.add(s);
     clouds.push({ s, drift: 1.5 + rngC() * 2.5 });
   }
 
-  // ---- 远山剪影环（两层，暖霾色）----
-  function ridgeRing(radius, baseH, amp, color, seedOff) {
-    const N = 160;
-    const pos = new Float32Array(N * 2 * 3);
-    const idx = [];
-    for (let i = 0; i < N; i++) {
-      const a0 = (i / N) * Math.PI * 2;
-      const a1 = ((i + 1) / N) * Math.PI * 2;
-      const h0 = baseH + Math.abs(fbm(Math.cos(a0) * 3.1, Math.sin(a0) * 3.1, 4, seed + seedOff)) * amp + Math.abs(fbm(Math.cos(a0) * 9.7, Math.sin(a0) * 9.7, 3, seed + seedOff + 9)) * amp * 0.3;
-      const h1 = baseH + Math.abs(fbm(Math.cos(a1) * 3.1, Math.sin(a1) * 3.1, 4, seed + seedOff)) * amp + Math.abs(fbm(Math.cos(a1) * 9.7, Math.sin(a1) * 9.7, 3, seed + seedOff + 9)) * amp * 0.3;
-      const x0 = Math.cos(a0) * radius, z0 = Math.sin(a0) * radius;
-      const x1 = Math.cos(a1) * radius, z1 = Math.sin(a1) * radius;
-      const o = i * 6;
-      pos[o + 0] = x0; pos[o + 1] = h0; pos[o + 2] = z0;
-      pos[o + 3] = x0; pos[o + 4] = -60; pos[o + 5] = z0;
-      pos[o + 6] = x1; pos[o + 7] = h1; pos[o + 8] = z1;
-      pos[o + 9] = x1; pos[o + 10] = -60; pos[o + 11] = z1;
-      // 两点一条带，退化三角形避免索引翻面
-      idx.push(o / 3, o / 3 + 1, o / 3 + 2, o / 3 + 2, o / 3 + 1, o / 3 + 3);
+  // Folded ridges. The lower faces converge to the same haze as the piste.
+  function ridgeRing(radius, peakHeight, seedOff, distant) {
+    const count = 260, rows = 7;
+    const positions = [], colors = [];
+    const peaks = [], folds = [];
+    const haze = scene.fog.color;
+    const snow = new THREE.Color(distant ? '#e1ebf2' : '#fff1e5').convertSRGBToLinear();
+    const rock = new THREE.Color(distant ? '#8ca7bf' : '#4b6683').convertSRGBToLinear();
+    const color = new THREE.Color(), normal = new THREE.Vector3(), edge = new THREE.Vector3();
+    const ridgeSeed = seed + seedOff;
+    for (let i = 0; i < count; i++) {
+      const a = 2 * Math.PI * i / count;
+      const x = Math.cos(a), z = Math.sin(a);
+      const massif = Math.abs(fbm(x * 3.1, z * 3.1, 3, ridgeSeed));
+      const crag = Math.abs(fbm(x * 12, z * 12, 3, ridgeSeed + 19));
+      peaks.push(peakHeight * (0.18 + massif * 1.2 + crag * 0.40));
+      folds.push(vnoise2(x * 16, z * 16, ridgeSeed + 6));
+    }
+    function vertex(i, j) {
+      const t = j / (rows - 1);
+      const angle = i * 2 * Math.PI / count;
+      const a = angle + (1 - t) * (0.13 * Math.sin(4 * angle) + (folds[i] - 0.5) * 0.055);
+      const r = radius * (0.55 + 0.45 * t + (1 - t) * folds[i] * 0.24);
+      return new THREE.Vector3(Math.cos(a) * r, U.lerp(-radius * 0.29, peaks[i], t) + Math.sin(t * Math.PI) * (folds[i] - 0.5) * peakHeight * 0.65, Math.sin(a) * r);
+    }
+    function face(a, b, c, t, tint) {
+      normal.subVectors(b, a).cross(edge.subVectors(c, a)).normalize();
+      const light = U.smoothstep(-0.22, 0.68, normal.x * 0.86 + normal.y * 0.60 + (tint - 0.5) * 0.55);
+      color.copy(rock).lerp(snow, light * (0.42 + 0.58 * t));
+      for (const v of [a, b, c]) {
+        positions.push(v.x, v.y, v.z);
+        const fade = (distant ? 0.32 : 0.15) + (distant ? 0.68 : 0.85) * U.smoothstep(peakHeight * 0.3, -radius * 0.12, v.y);
+        colors.push(U.lerp(color.r, haze.r, fade), U.lerp(color.g, haze.g, fade), U.lerp(color.b, haze.b, fade));
+      }
+    }
+    for (let i = 0; i < count; i++) {
+      const next = (i + 1) % count;
+      for (let j = 0; j < rows - 1; j++) {
+        const a = vertex(i, j), b = vertex(next, j), c = vertex(i, j + 1), d = vertex(next, j + 1);
+        face(a, b, c, (j + 1) / (rows - 1), folds[i]);
+        face(c, b, d, (j + 1) / (rows - 1), folds[next]);
+      }
     }
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setIndex(idx);
-    const mat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(color).convertSRGBToLinear(),
-      side: THREE.DoubleSide, fog: false, depthWrite: false,
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const material = new THREE.ShaderMaterial({
+      vertexColors: true, side: THREE.DoubleSide, depthWrite: false,
+      uniforms: { peak: { value: peakHeight }, relief: { value: distant ? 0.35 : 0.80 } },
+      vertexShader: `
+        varying vec3 vColor, vRock;
+        void main() {
+          vColor = color; vRock = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
+        }`,
+      fragmentShader: `
+        varying vec3 vColor, vRock;
+        uniform float peak, relief;
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(27.1, 91.7))) * 17831.43); }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          f = f*f*(3.-2.*f);
+          return mix(mix(hash(i), hash(i+vec2(1,0)), f.x),
+                     mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
+        }
+        void main() {
+          float slope = vRock.x + vRock.z * 0.72 + 0.38*vRock.y;
+          vec2 uv = vec2(slope * 0.055, vRock.y * 0.019);
+          float seam = noise(uv) + 0.38*noise(uv*3.1);
+          float detail = relief * smoothstep(-0.45, 0.2, vRock.y / peak);
+          float rock = smoothstep(0.69, 0.99, seam) * (1.-0.55*smoothstep(0.4, 1.1, vRock.y/peak));
+          vec3 col = mix(vColor, vColor * vec3(0.54,0.64,0.75), rock * detail);
+          col += vec3(0.11,0.12,0.13) * (1.-smoothstep(0.42,0.66,seam))*detail;
+          gl_FragColor = vec4(col,1.);
+        }`,
     });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.renderOrder = -95;
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.renderOrder = distant ? -96 : -95;
     mesh.frustumCulled = false;
     return mesh;
   }
-  const ridge1 = ridgeRing(1050, 55, 190, '#c3ab8e', 401);
-  const ridge2 = ridgeRing(760, 40, 130, '#ad9980', 807);
+  const ridge1 = ridgeRing(1220, 265, 401, true);
+  const ridge2 = ridgeRing(780, 135, 807, false);
   scene.add(ridge1, ridge2);
 
   return {

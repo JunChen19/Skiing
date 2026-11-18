@@ -106,9 +106,9 @@ body {
 .hint { margin-top: 16px; font-size: 12px; color: var(--dim); letter-spacing: 0.5px; }
 
 /* ---------- HUD ---------- */
-#hud { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
-.hud-left { position: absolute; top: max(14px, env(safe-area-inset-top)); left: 18px; display: flex; gap: 22px; }
-.hud-right { position: absolute; top: max(14px, env(safe-area-inset-top)); right: 74px; }
+#hud { display: flex; align-items: flex-start; justify-content: space-between; padding: max(15px, env(safe-area-inset-top)) 18px 0; position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+.hud-left, .hud-right { display: flex; align-items: center; gap: 18px; }
+.hud-left, .hud-right, .hud-stage { background: rgba(15,38,50,.79); border-radius: 10px; padding: 9px 13px; }
 .hud-item { display: flex; flex-direction: column; gap: 1px; }
 .hud-label { font-size: 10px; letter-spacing: 3px; color: var(--dim); }
 .hud-val b {
@@ -117,7 +117,7 @@ body {
   text-shadow: 0 2px 10px rgba(0,0,0,0.55);
 }
 .hud-val i { font-style: normal; font-size: 11px; color: var(--dim); margin-left: 3px; }
-.hud-buttons { position: absolute; top: max(14px, env(safe-area-inset-top)); right: 14px; display: flex; gap: 8px; pointer-events: auto; }
+.hud-buttons { display: flex; gap: 8px; pointer-events: auto; }
 .icon-btn {
   width: 38px; height: 38px; border-radius: 11px;
   border: 1px solid var(--line); background: rgba(10,18,32,0.5);
@@ -175,6 +175,28 @@ body {
   .hud-val b { font-size: 21px; }
 }
 
+.hud-stage { position: absolute; left: 18px; bottom: max(20px, env(safe-area-inset-bottom)); display: grid; gap: 3px; }
+.hud-stage strong { font-size: 15px; }
+.hud-stage span { font-size: 12px; color: #c2dbe1; }
+#splits > div { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+#splits { margin-top: 12px; }
+.screen { padding: 12px; overflow: auto; }
+.panel { margin: auto; }
+#boot { justify-content: flex-start; background: linear-gradient(90deg,rgba(11,32,43,.38),transparent 75%); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.boot-panel { margin: auto auto auto clamp(10px,7vw,130px); text-align: left; background: rgba(15,40,50,.92); border-radius: 16px; }
+.boot-panel .logo-zh { text-indent: 0; background: none; -webkit-text-fill-color: #f5f6ef; filter: none; }
+.boot-panel .logo-en { text-indent: 0; color: #b8d9d7; }
+.btn.primary { background: #de683f; box-shadow: none; color: #fff; }
+.btn, .field input { border-radius: 8px; }
+@media (max-width: 540px) {
+  #hud { padding-inline: 8px; }
+  .hud-left, .hud-right { gap: 8px; padding: 6px 8px; }
+  .hud-buttons { gap: 4px; }
+  .icon-btn { width: 34px; height: 36px; }
+  .hud-stage { left: 8px; }
+  .boot-panel { margin: auto; }
+}
+
 </style>
 </head>
 <body>
@@ -189,25 +211,26 @@ body {
     </div>
     <div class="hud-right">
       <div class="hud-item"><span class="hud-label">最佳</span><span class="hud-val"><b id="hud-best">—</b></span></div>
-    </div>
     <div class="hud-buttons">
       <button id="btn-mute" class="icon-btn" title="静音">♪</button>
       <button id="btn-pause" class="icon-btn" title="暂停">II</button>
     </div>
+    </div>
+    <div class="hud-stage"><strong id="hud-stage"></strong><span id="hud-next"></span></div>
   </div>
 
   <!-- 开始界面 -->
   <div id="boot" class="screen">
     <div class="panel boot-panel">
       <div class="logo"><span class="logo-zh">雪线</span><span class="logo-en">SNOWLINE</span></div>
-      <div class="tagline">无尽雪坡 · 物理走刃 · 全球排行</div>
+      <div class="tagline">蓝旗指引宽线，橙旗标记林间捷径。</div>
       <div class="field">
         <label for="inp-name">你的名字</label>
-        <input id="inp-name" type="text" maxlength="16" placeholder="输入用户名，记录到排行榜" autocomplete="off">
+        <input id="inp-name" type="text" maxlength="16" placeholder="为成绩署名（选填）" autocomplete="off">
       </div>
       <button id="btn-start" class="btn primary big">开始滑行</button>
       <button id="btn-board-boot" class="btn ghost">排行榜</button>
-      <div class="hint">桌面：移动鼠标左右走刃 · 手机：按住屏幕左右滑动</div>
+      <div class="hint">鼠标或 ← → 转向 · 触屏按住左右滑动</div>
     </div>
   </div>
 
@@ -217,8 +240,10 @@ body {
       <div class="over-title">撞树了！</div>
       <div class="over-score"><b id="over-score">0</b><i>m</i></div>
       <div class="over-sub" id="over-sub"></div>
+      <div id="splits"></div>
       <div id="over-rank" class="over-rank"></div>
-      <button id="btn-retry" class="btn primary big">再滑一次</button>
+      <button id="btn-retry" class="btn primary big">重试这条路线</button>
+      <button id="btn-new" class="btn ghost">换一条路线</button>
       <button id="btn-board-over" class="btn ghost">排行榜</button>
     </div>
   </div>
@@ -309,7 +334,7 @@ const CFG = {
   // 摄像机
   CAM_BACK: 8.6,
   CAM_UP: 3.3,
-  CAM_AHEAD: 6.5,
+  CAM_AHEAD: 15,
   CAM_FOV_BASE: 62,
   CAM_FOV_SPEED: 0.09,
 
@@ -399,24 +424,16 @@ function difficultyAt(z) {
   return U.smoothstep(0, 1, U.clamp(-z / CFG.DIFF_DIST, 0, 1));
 }
 
-// 坡度（度），随难度增加 + 低频起伏 ±22%
-function slopeDegAt(z, seed) {
-  const d = difficultyAt(z);
-  const deg = U.lerp(CFG.SLOPE_MIN_DEG, CFG.SLOPE_MAX_DEG, d);
-  const wig = (vnoise2(z * 0.0031, 0.37, seed + 55) - 0.5) * 0.45;
-  return deg * (1 + wig);
-}
-
-// ---- 唯一权威地形高度函数（网格 / 物理 / 树木摆放全用它）----
+// Integrate the smooth change in grade. Its derivative stays bounded at any distance.
+const START_GRADE = Math.tan(U.deg(CFG.SLOPE_MIN_DEG));
+const GRADE_CHANGE = Math.tan(U.deg(CFG.SLOPE_MAX_DEG)) - START_GRADE;
 function terrainHeight(x, z, seed) {
-  const grade = Math.tan(U.deg(slopeDegAt(z, seed)));
-  let h = z * grade;
-
-  // 大起伏（滚落线雪包）：幅度/频率调校为保证整体持续下坡，
-  // 噪声最大斜率(~amp*freq*3)须小于基础坡度，避免出现平坡/上坡刹车段
-  h -= fbm(x * 0.012, z * 0.012, 4, seed) * 5.2;
-  // 中细节
-  h += fbm(x * 0.05 + 31.7, z * 0.05, 3, seed + 7) * 1.5;
+  const distance = Math.max(0, -z);
+  const t = Math.min(1, distance / CFG.DIFF_DIST);
+  const integral = CFG.DIFF_DIST * t * t * t * (1 - t * 0.5) + Math.max(0, distance - CFG.DIFF_DIST);
+  let h = z * START_GRADE - GRADE_CHANGE * integral;
+  h += fbm(x * 0.012, z * 0.012, 3, seed) * 2.8;
+  h += fbm(x * 0.045 + 31.7, z * 0.034, 2, seed + 7) * 0.48;
   // 走廊边缘的风唇
   const a = Math.abs(x);
   if (a > 34) {
@@ -426,7 +443,9 @@ function terrainHeight(x, z, seed) {
   if (a > CFG.BANK_START) {
     const t = a - CFG.BANK_START;
     const rock = 0.5 + 0.5 * fbm(x * 0.045, z * 0.045, 3, seed + 13);
-    h += t * t * 0.036 + t * rock * 0.5;
+    const shoulder = x > 0 ? 0.48 : 0.12;
+    const fold = 0.75 + 0.25 * Math.cos(z * 0.017 + (seed % 19));
+    h += t * shoulder * fold * (0.55 + rock) + U.smoothstep(0, 28, t) * rock * 3.5;
   }
   return h;
 }
@@ -439,6 +458,35 @@ function terrainNormalAt(x, z, seed, out) {
   const dz = (terrainHeight(x, z + e, seed) - terrainHeight(x, z - e, seed)) / (2 * e);
   out = out || new THREE.Vector3();
   return out.set(-dx, 1, -dz).normalize();
+}
+
+// Each 300 m sector joins the next at x=0 with level tangents.
+// The last bend has a narrow, straight inside line and a wider outside arc.
+const COURSE_LENGTH = 300;
+// Stretch later sectors to keep their turn radius reachable at terminal speed.
+const LONG_SECTOR = 480;
+function sectorAt(distance) {
+  return distance < COURSE_LENGTH ? 0 : 1 + Math.floor((distance - COURSE_LENGTH) / LONG_SECTOR);
+}
+function sectorDistance(sector, local) {
+  return sector === 0 ? local : COURSE_LENGTH + (sector - 1) * LONG_SECTOR + local * LONG_SECTOR / COURSE_LENGTH;
+}
+const COURSE_KNOTS = [0, 30, 74, 131, 184, 222, 261, 300];
+const COURSE_OFFSETS = [0, 0, 12, -12, 11, 0, 15, 0];
+function courseAt(distance, seed, out) {
+  const d = Math.max(0, distance);
+  const sector = sectorAt(d);
+  const local = (d - sectorDistance(sector, 0)) * (sector ? COURSE_LENGTH / LONG_SECTOR : 1);
+  const variation = hash2i(sector, 51, seed);
+  const scale = (variation < 0.5 ? -1 : 1) * (0.82 + 0.18 * Math.abs(2 * variation - 1));
+  let i = 0;
+  while (local >= COURSE_KNOTS[i + 1]) i++;
+  const phase = (local - COURSE_KNOTS[i]) / (COURSE_KNOTS[i + 1] - COURSE_KNOTS[i]);
+  const t = (1 - Math.cos(phase * Math.PI)) * 0.5;
+  out.x = scale * U.lerp(COURSE_OFFSETS[i], COURSE_OFFSETS[i + 1], t);
+  out.width = U.lerp(6.8, 4.2, difficultyAt(-d));
+  out.shortcut = local >= 222;
+  return out;
 }
 
 
@@ -459,8 +507,8 @@ function makeSky(scene, seed) {
     uniforms: {
       uSunDir: { value: sunDir },
       uZenith: { value: new THREE.Color('#1d4b7e').convertSRGBToLinear() },
-      uMid:    { value: new THREE.Color('#6d94b8').convertSRGBToLinear() },
-      uHorizon:{ value: new THREE.Color('#eccda4').convertSRGBToLinear() },
+      uMid:    { value: new THREE.Color('#89b4cf').convertSRGBToLinear() },
+      uHorizon:{ value: new THREE.Color('#dce7ec').convertSRGBToLinear() },
       uSunCol: { value: new THREE.Color('#fff3d6').convertSRGBToLinear() },
     },
     vertexShader: `
@@ -528,51 +576,100 @@ function makeSky(scene, seed) {
   const rngC = mulberry32(seed + 31);
   for (let i = 0; i < 8; i++) {
     const m = new THREE.SpriteMaterial({
-      map: cloudTex, transparent: true, opacity: 0.5, depthWrite: false, fog: false,
+      map: cloudTex, transparent: true, opacity: 0.25, depthWrite: false, fog: false,
     });
     const s = new THREE.Sprite(m);
     const sc = 150 + rngC() * 220;
-    s.scale.set(sc, sc * 0.42, 1);
+    s.scale.set(sc, sc * 0.23, 1);
     s.position.set((rngC() - 0.5) * 1300, 110 + rngC() * 130, -120 - rngC() * 950);
     s.renderOrder = -90;
     cloudGroup.add(s);
     clouds.push({ s, drift: 1.5 + rngC() * 2.5 });
   }
 
-  // ---- 远山剪影环（两层，暖霾色）----
-  function ridgeRing(radius, baseH, amp, color, seedOff) {
-    const N = 160;
-    const pos = new Float32Array(N * 2 * 3);
-    const idx = [];
-    for (let i = 0; i < N; i++) {
-      const a0 = (i / N) * Math.PI * 2;
-      const a1 = ((i + 1) / N) * Math.PI * 2;
-      const h0 = baseH + Math.abs(fbm(Math.cos(a0) * 3.1, Math.sin(a0) * 3.1, 4, seed + seedOff)) * amp + Math.abs(fbm(Math.cos(a0) * 9.7, Math.sin(a0) * 9.7, 3, seed + seedOff + 9)) * amp * 0.3;
-      const h1 = baseH + Math.abs(fbm(Math.cos(a1) * 3.1, Math.sin(a1) * 3.1, 4, seed + seedOff)) * amp + Math.abs(fbm(Math.cos(a1) * 9.7, Math.sin(a1) * 9.7, 3, seed + seedOff + 9)) * amp * 0.3;
-      const x0 = Math.cos(a0) * radius, z0 = Math.sin(a0) * radius;
-      const x1 = Math.cos(a1) * radius, z1 = Math.sin(a1) * radius;
-      const o = i * 6;
-      pos[o + 0] = x0; pos[o + 1] = h0; pos[o + 2] = z0;
-      pos[o + 3] = x0; pos[o + 4] = -60; pos[o + 5] = z0;
-      pos[o + 6] = x1; pos[o + 7] = h1; pos[o + 8] = z1;
-      pos[o + 9] = x1; pos[o + 10] = -60; pos[o + 11] = z1;
-      // 两点一条带，退化三角形避免索引翻面
-      idx.push(o / 3, o / 3 + 1, o / 3 + 2, o / 3 + 2, o / 3 + 1, o / 3 + 3);
+  // Folded ridges. The lower faces converge to the same haze as the piste.
+  function ridgeRing(radius, peakHeight, seedOff, distant) {
+    const count = 260, rows = 7;
+    const positions = [], colors = [];
+    const peaks = [], folds = [];
+    const haze = scene.fog.color;
+    const snow = new THREE.Color(distant ? '#e1ebf2' : '#fff1e5').convertSRGBToLinear();
+    const rock = new THREE.Color(distant ? '#8ca7bf' : '#4b6683').convertSRGBToLinear();
+    const color = new THREE.Color(), normal = new THREE.Vector3(), edge = new THREE.Vector3();
+    const ridgeSeed = seed + seedOff;
+    for (let i = 0; i < count; i++) {
+      const a = 2 * Math.PI * i / count;
+      const x = Math.cos(a), z = Math.sin(a);
+      const massif = Math.abs(fbm(x * 3.1, z * 3.1, 3, ridgeSeed));
+      const crag = Math.abs(fbm(x * 12, z * 12, 3, ridgeSeed + 19));
+      peaks.push(peakHeight * (0.18 + massif * 1.2 + crag * 0.40));
+      folds.push(vnoise2(x * 16, z * 16, ridgeSeed + 6));
+    }
+    function vertex(i, j) {
+      const t = j / (rows - 1);
+      const angle = i * 2 * Math.PI / count;
+      const a = angle + (1 - t) * (0.13 * Math.sin(4 * angle) + (folds[i] - 0.5) * 0.055);
+      const r = radius * (0.55 + 0.45 * t + (1 - t) * folds[i] * 0.24);
+      return new THREE.Vector3(Math.cos(a) * r, U.lerp(-radius * 0.29, peaks[i], t) + Math.sin(t * Math.PI) * (folds[i] - 0.5) * peakHeight * 0.65, Math.sin(a) * r);
+    }
+    function face(a, b, c, t, tint) {
+      normal.subVectors(b, a).cross(edge.subVectors(c, a)).normalize();
+      const light = U.smoothstep(-0.22, 0.68, normal.x * 0.86 + normal.y * 0.60 + (tint - 0.5) * 0.55);
+      color.copy(rock).lerp(snow, light * (0.42 + 0.58 * t));
+      for (const v of [a, b, c]) {
+        positions.push(v.x, v.y, v.z);
+        const fade = (distant ? 0.32 : 0.15) + (distant ? 0.68 : 0.85) * U.smoothstep(peakHeight * 0.3, -radius * 0.12, v.y);
+        colors.push(U.lerp(color.r, haze.r, fade), U.lerp(color.g, haze.g, fade), U.lerp(color.b, haze.b, fade));
+      }
+    }
+    for (let i = 0; i < count; i++) {
+      const next = (i + 1) % count;
+      for (let j = 0; j < rows - 1; j++) {
+        const a = vertex(i, j), b = vertex(next, j), c = vertex(i, j + 1), d = vertex(next, j + 1);
+        face(a, b, c, (j + 1) / (rows - 1), folds[i]);
+        face(c, b, d, (j + 1) / (rows - 1), folds[next]);
+      }
     }
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setIndex(idx);
-    const mat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(color).convertSRGBToLinear(),
-      side: THREE.DoubleSide, fog: false, depthWrite: false,
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const material = new THREE.ShaderMaterial({
+      vertexColors: true, side: THREE.DoubleSide, depthWrite: false,
+      uniforms: { peak: { value: peakHeight }, relief: { value: distant ? 0.35 : 0.80 } },
+      vertexShader: `
+        varying vec3 vColor, vRock;
+        void main() {
+          vColor = color; vRock = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
+        }`,
+      fragmentShader: `
+        varying vec3 vColor, vRock;
+        uniform float peak, relief;
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(27.1, 91.7))) * 17831.43); }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          f = f*f*(3.-2.*f);
+          return mix(mix(hash(i), hash(i+vec2(1,0)), f.x),
+                     mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
+        }
+        void main() {
+          float slope = vRock.x + vRock.z * 0.72 + 0.38*vRock.y;
+          vec2 uv = vec2(slope * 0.055, vRock.y * 0.019);
+          float seam = noise(uv) + 0.38*noise(uv*3.1);
+          float detail = relief * smoothstep(-0.45, 0.2, vRock.y / peak);
+          float rock = smoothstep(0.69, 0.99, seam) * (1.-0.55*smoothstep(0.4, 1.1, vRock.y/peak));
+          vec3 col = mix(vColor, vColor * vec3(0.54,0.64,0.75), rock * detail);
+          col += vec3(0.11,0.12,0.13) * (1.-smoothstep(0.42,0.66,seam))*detail;
+          gl_FragColor = vec4(col,1.);
+        }`,
     });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.renderOrder = -95;
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.renderOrder = distant ? -96 : -95;
     mesh.frustumCulled = false;
     return mesh;
   }
-  const ridge1 = ridgeRing(1050, 55, 190, '#c3ab8e', 401);
-  const ridge2 = ridgeRing(760, 40, 130, '#ad9980', 807);
+  const ridge1 = ridgeRing(1220, 265, 401, true);
+  const ridge2 = ridgeRing(780, 135, 807, false);
   scene.add(ridge1, ridge2);
 
   return {
@@ -601,7 +698,7 @@ function makeSky(scene, seed) {
 //   · 非均匀网格——走廊内 ~0.9m/格（精细），两侧堤外 ~3m/格（省资源）
 //   · 法线用网格高度差分计算（块边界用解析差分保证无缝）
 //   · 生成任务按行切片、分帧推进（update(ms) 预算制），彻底消除重建卡顿
-//   · 材质注入雪面闪光 + 微细法线扰动 + 冷调菲涅尔
+//   · 雪面使用风纹、压雪道配色和板下接触阴影
 'use strict';
 
 const terrainTimeUniform = { value: 0 };
@@ -615,17 +712,18 @@ function makeTerrain(scene, seed) {
   const colX = new Float32Array(COLS);
   for (let ix = 0; ix < COLS; ix++) {
     const t = -1 + (2 * ix) / W_SEG;
-    colX[ix] = Math.sign(t) * Math.pow(Math.abs(t), 1.55) * W_HALF;
+    colX[ix] = Math.sign(t) * (Math.pow(Math.abs(t), 1.55) * W_HALF + 240 * Math.pow(Math.abs(t), 12));
   }
 
   // ---- 材质 ----
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.5,
+    roughness: 0.84,
     metalness: 0.0,
   });
+  const contact = { value: new THREE.Vector4(0, 0, 0, 1) };
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = terrainTimeUniform;
+    shader.uniforms.uContact = contact;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -633,28 +731,16 @@ function makeTerrain(scene, seed) {
       .replace('#include <common>', [
         '#include <common>',
         'varying vec3 vWP;',
-        'uniform float uTime;',
-        'float sphHash(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }',
+        'uniform vec4 uContact;',
       ].join('\n'))
-      .replace('#include <dithering_fragment>', [
-        '{',
-        '  vec3 cell = floor(vWP * 6.0);',
-        // 微细法线扰动：雪面颗粒起伏感
-        '  vec3 mj = vec3(sphHash(cell + 7.1), sphHash(cell + 8.3), sphHash(cell + 9.7)) - 0.5;',
-        '  normal = normalize(normal + mj * 0.10);',
-        // 闪光晶粒
-        '  float tw = sphHash(cell + floor(uTime * 3.0) * 0.37);',
-        '  if (tw > 0.9958) {',
-        '    vec3 vd = normalize(cameraPosition - vWP);',
-        '    vec3 jitterN = normalize(normal + vec3(sphHash(cell + 1.7) - 0.5, sphHash(cell + 2.3) - 0.5, sphHash(cell + 3.1) - 0.5) * 0.3);',
-        '    float glint = pow(max(dot(vd, jitterN), 0.0), 26.0);',
-        '    gl_FragColor.rgb += vec3(1.5, 1.38, 1.15) * glint * 1.35;',
-        '  }',
-        '  vec3 vd2 = normalize(cameraPosition - vWP);',
-        '  float fres = pow(1.0 - max(dot(vd2, normal), 0.0), 3.0);',
-        '  gl_FragColor.rgb += vec3(0.35, 0.5, 0.75) * fres * 0.10;',
-        '}',
-        '#include <dithering_fragment>',
+      .replace('#include <color_fragment>', [
+        '#include <color_fragment>',
+        'vec2 offset = vWP.xz - uContact.xy;',
+        'vec2 local = vec2(dot(offset, vec2(uContact.w, -uContact.z)), dot(offset, uContact.zw));',
+        'float contactShade = exp(-dot(local * vec2(2.9, 1.3), local * vec2(2.9, 1.3)));',
+        'float wind = sin(vWP.x * 2.8 + vWP.z * 0.67 + sin(vWP.z * 0.17) * 2.0);',
+        'float nearDetail = 1.0 - smoothstep(12.0, 62.0, length(cameraPosition - vWP));',
+        'diffuseColor.rgb *= (1.0 + 0.014 * wind * nearDetail) * (1.0 - contactShade * 0.32);',
       ].join('\n'));
   };
 
@@ -663,6 +749,7 @@ function makeTerrain(scene, seed) {
   const COL_SNOW_BLUE = new THREE.Color('#c9dcee').convertSRGBToLinear();
   const COL_ROCK = new THREE.Color('#8d857b').convertSRGBToLinear();
   const COL_ROCK_DARK = new THREE.Color('#6e675f').convertSRGBToLinear();
+  const laneSample = {};
   const tmpCol = new THREE.Color();
   const nrm = new THREE.Vector3();
 
@@ -751,6 +838,7 @@ function makeTerrain(scene, seed) {
     const zTop = -job.k * L;
     const z = zTop - (iz / Z_SEG) * L;
     const base = iz * COLS;
+    const lane = courseAt(-z, seed, laneSample);
     const zUp = zTop - ((iz - 1) / Z_SEG) * L;
     const zDn = zTop - ((iz + 1) / Z_SEG) * L;
     for (let ix = 0; ix < COLS; ix++) {
@@ -772,6 +860,9 @@ function makeTerrain(scene, seed) {
       const x = colX[ix];
       const scoured = 0.5 + 0.5 * fbm(x * 0.11, z * 0.11, 2, seed + 3);
       tmpCol.copy(COL_SNOW).lerp(COL_SNOW_BLUE, scoured * 0.4);
+      const pathDist = Math.min(Math.abs(x - lane.x) / lane.width, lane.shortcut ? Math.abs(x) / 2.2 : Infinity);
+      const groomed = 1 - U.smoothstep(0.65, 1.35, pathDist);
+      tmpCol.lerp(COL_SNOW_BLUE, (1 - groomed) * 0.48);
       const rockMix = U.smoothstep(0.8, 0.6, ny) * (0.55 + 0.45 * fbm(x * 0.13 + 5, z * 0.13, 2, seed + 17));
       if (rockMix > 0.001) {
         tmpCol.lerp(COL_ROCK, rockMix).lerp(COL_ROCK_DARK, rockMix * 0.4);
@@ -810,6 +901,7 @@ function makeTerrain(scene, seed) {
 
   function reset(newSeed) {
     seed = newSeed;
+    for (const job of buildQueue) pool.push(job.c);
     buildQueue.length = 0;
     if (activeJob) { pool.push(activeJob.c); activeJob = null; }
     for (const c of chunks.values()) { c.mesh.visible = false; pool.push(c); }
@@ -817,8 +909,15 @@ function makeTerrain(scene, seed) {
     ensure(0);
   }
 
+  function finishNearest() {
+    if (!buildQueue.length) return;
+    const job = buildQueue.shift();
+    while (!stepOneRow(job)) { /* Complete the starting tile before showing the slope. */ }
+    finishJob(job);
+  }
+
   return {
-    ensure,
+    contact, finishNearest, ensure,
     update,
     reset,
     mat,
@@ -885,17 +984,36 @@ function makeTrees(scene, seed) {
   const CORRIDOR = CFG.CORRIDOR;
 
   // ---- 几何体 ----
-  function pineGeo() {
+  function pineGeo(variant) {
+    const rng = mulberry32(501 + variant);
     const parts = [];
-    const trunk = new THREE.CylinderGeometry(0.09, 0.18, 1.4, 7);
-    trunk.translate(0, 0.7, 0);
-    parts.push({ geo: trunk, cBottom: '#5c4834', cTop: '#6b563e' });
-    const c1 = new THREE.ConeGeometry(1.5, 1.7, 9); c1.translate(0, 1.55, 0);
-    parts.push({ geo: c1, cBottom: '#1e4a38', cTop: '#2e6650' });
-    const c2 = new THREE.ConeGeometry(1.06, 1.45, 9); c2.translate(0, 2.5, 0);
-    parts.push({ geo: c2, cBottom: '#275846', cTop: '#3f8066' });
-    const c3 = new THREE.ConeGeometry(0.6, 1.2, 9); c3.translate(0, 3.32, 0);
-    parts.push({ geo: c3, cBottom: '#2e6a52', cTop: '#eef4f4' }); // 顶部挂雪
+    const trunk = new THREE.CylinderGeometry(0.08, 0.22, 4.6, 7);
+    trunk.translate(0, 2.3, 0);
+    parts.push({ geo: trunk, cBottom: '#705549', cTop: '#9c8065' });
+    // Two irregular rings per whorl form drooping boughs with a snowy upper face.
+    for (let level = 0; level < 5; level++) {
+      const y = 1.2 + level * 0.78;
+      const r = (1.45 - level * 0.24) * (0.82 + variant * 0.14);
+      const phase = rng() * 6.28;
+      const vertices = [], indices = [];
+      for (let j = 0; j < 12; j++) {
+        const a = phase + j * Math.PI / 6;
+        const reach = r * (j % 2 ? 0.47 : 0.93 + rng() * 0.20);
+        const tip = y + (j % 2 ? 0.26 : -rng() * 0.24);
+        const dx = Math.cos(a) * reach, dz = Math.sin(a) * reach;
+        vertices.push(dx, tip, dz, dx * 0.83, tip + 0.24, dz * 0.83);
+      }
+      vertices.push(0.09 * variant, y + 1.1, -0.05, 0, y + 0.24, 0);
+      for (let j = 0; j < 12; j++) {
+        const a = 2 * j, b = 2 * ((j + 1) % 12);
+        indices.push(a, a+1, b, b, a+1, b+1, a+1, 24, b+1, b, 25, a);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      geo.setIndex(indices);
+      geo.computeVertexNormals();
+      parts.push({ geo, cBottom: '#345e55', cTop: level === 0 ? '#689085' : (level < 3 ? '#a6c3b7' : '#e7efec') });
+    }
     return mergeTreeParts(parts);
   }
   function deadGeo() {
@@ -917,14 +1035,26 @@ function makeTrees(scene, seed) {
   const treeMat = new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 0.92, metalness: 0,
   });
-  const CAP_PINE = 2400, CAP_DEAD = 420;
-  const pineMesh = new THREE.InstancedMesh(pineGeo(), treeMat, CAP_PINE);
-  const deadMesh = new THREE.InstancedMesh(deadGeo(), treeMat.clone(), CAP_DEAD);
-  for (const m of [pineMesh, deadMesh]) {
-    m.castShadow = true;
-    m.frustumCulled = false;
-    m.count = 0;
-    scene.add(m);
+  const pineShapes = [pineGeo(0), pineGeo(1), pineGeo(2), deadGeo()];
+  // Trail-edge pennants mark the broad line in blue and the forest cut in ochre.
+  const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.035, 0.042, 1.55, 5),
+    new THREE.MeshStandardMaterial({ color: 0x536d75 }), 96);
+  const flags = new THREE.InstancedMesh(new THREE.BoxGeometry(0.85, 0.42, 0.055),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }), 96);
+  // r128 allocates instanceColor from the current draw count on its first write.
+  flags.setColorAt(0, new THREE.Color(1, 1, 1));
+  for (const mesh of [poles, flags]) { mesh.frustumCulled = false; mesh.count = 0; scene.add(mesh); }
+  const batches = [];
+  for (let range = 0; range < 2; range++) {
+    for (const shape of pineShapes) {
+      const mesh = new THREE.InstancedMesh(shape, treeMat, 1600);
+      mesh.setColorAt(0, new THREE.Color(1, 1, 1));
+      mesh.castShadow = range === 0;
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      scene.add(mesh);
+      batches.push(mesh);
+    }
   }
 
   // ---- 行带生成（确定性）----
@@ -936,18 +1066,28 @@ function makeTrees(scene, seed) {
     const rng = mulberry32(Math.floor(hash2i(n, 7, seed) * 2147483647));
     const z = zMid + (rng() - 0.5) * BAND * 0.7;
     const trees = [];
-    // 开场留 50m 空场
-    if (-z < 50) return trees;
-    const gapW = U.lerp(CFG.TREE_GAP_START, CFG.TREE_GAP_END, d);
-    const gapC = (rng() * 2 - 1) * (CORRIDOR - 6);
-    const density = U.lerp(CFG.TREE_DENSITY_START, CFG.TREE_DENSITY_END, d);
-    // 走廊内：留出 gap，其余按密度撒
-    for (let x = -CORRIDOR; x <= CORRIDOR; x += 3.1) {
-      const jx = x + (rng() - 0.5) * 2.2;
-      if (Math.abs(jx - gapC) < gapW * 0.5) continue;
-      if (rng() < density) {
-        trees.push(makeTree(jx, z, rng, d));
-      }
+    const lane = {};
+    for (let x = -CORRIDOR; x <= CORRIDOR; x += 3.5) {
+      const jx = x + (rng() - 0.5) * 3.2;
+      const jz = zMid + (rng() - 0.5) * BAND * 0.95;
+      courseAt(-jz, seed, lane);
+      // Open start, clustered forest edges, and clearance for the whole skier.
+      const separation = Math.abs(jx - lane.x);
+      const opening = 1 - U.smoothstep(25, 65, -jz);
+      if (separation < lane.width + 1.8 + opening * 18) continue;
+      if (lane.shortcut && Math.abs(jx) < 3.4) continue;
+      const cluster = vnoise2(jx * 0.054, jz * 0.045, seed + 89);
+      const density = (0.18 + d * 0.12 + 0.56 * cluster * cluster) * (1 - opening * 0.5);
+      if (rng() < density) trees.push(makeTree(jx, jz, rng, d));
+    }
+    // A tree island on the inside of each apex makes the choice of line visible.
+    const sector = sectorAt(-zMid);
+    for (const apex of [74, 131, 184, 261]) {
+      const dist = sectorDistance(sector, apex);
+      if (Math.floor(dist / BAND) !== n) continue;
+      courseAt(dist, seed, lane);
+      const x = lane.shortcut ? Math.sign(lane.x) * 4.5 : 0;
+      if (Math.abs(x - lane.x) > lane.width + 1.6) trees.push(makeTree(x, -dist, rng, d));
     }
     // 两岸装饰树（不参与难度）
     for (const side of [-1, 1]) {
@@ -974,7 +1114,8 @@ function makeTrees(scene, seed) {
       r: Math.max(0.42, 0.5 * s),
       tint: 0.86 + rng() * 0.26,
       frost,
-      dead: rng() < 0.07,
+      shape: rng() < 0.05 ? 3 : Math.floor(rng() * 3),
+      ground: terrainHeight(x, z, seed),
     };
   }
 
@@ -1003,43 +1144,58 @@ function makeTrees(scene, seed) {
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler();
   const P = new THREE.Vector3(), S = new THREE.Vector3();
   const C = new THREE.Color();
-  function rebuildInstances() {
-    let np = 0, nd = 0;
-    for (const arr of chunkTrees.values()) {
-      for (const t of arr) {
-        const y = terrainHeight(t.x, t.z, seed);
-        E.set(t.tilt * 0.4, t.rot, t.tilt);
-        Q.setFromEuler(E);
-        P.set(t.x, y - 0.15, t.z);
-        S.set(t.s, t.s * (0.9 + (t.tint - 0.86) * 0.5), t.s);
-        M.compose(P, Q, S);
-        if (t.dead && nd < CAP_DEAD) {
-          deadMesh.setMatrixAt(nd++, M);
-        } else if (np < CAP_PINE) {
-          pineMesh.setMatrixAt(np, M);
-          if (t.frost) C.setRGB(0.8, 0.9, 1.0);
-          else C.setRGB(t.tint, t.tint * (0.95 + 0.1 * ((t.tint * 7) % 1)), t.tint * 0.92);
-          pineMesh.setColorAt(np, C);
-          np++;
-        }
+  function rebuildInstances(playerZ = 0) {
+    for (const mesh of batches) mesh.count = 0;
+    poles.count = flags.count = 0;
+    const lane = {};
+    function pennant(x, z, color) {
+      const y = terrainHeight(x, z, seed);
+      const i = poles.count++;
+      poles.setMatrixAt(i, M.makeTranslation(x, y + 0.77, z));
+      flags.setMatrixAt(flags.count++, M.makeTranslation(x + 0.40, y + 1.36, z));
+      flags.setColorAt(i, C.set(color).convertSRGBToLinear());
+    }
+    for (const k of chunkTrees.keys()) {
+      for (let d = k * CFG.CHUNK_LEN + 10; d < (k + 1) * CFG.CHUNK_LEN; d += 30) {
+        courseAt(d, seed, lane);
+        const side = lane.x < 0 ? -1 : 1;
+        pennant(lane.x + side * (lane.width + 0.6), -d, '#247fa1');
+        if (lane.shortcut) pennant(-side * 2.5, -d, '#e79036');
       }
     }
-    pineMesh.count = np;
-    deadMesh.count = nd;
-    pineMesh.instanceMatrix.needsUpdate = true;
-    deadMesh.instanceMatrix.needsUpdate = true;
-    if (pineMesh.instanceColor) pineMesh.instanceColor.needsUpdate = true;
+    poles.instanceMatrix.needsUpdate = flags.instanceMatrix.needsUpdate = true;
+    if (flags.instanceColor) flags.instanceColor.needsUpdate = true;
+    for (const arr of chunkTrees.values()) {
+      for (const t of arr) {
+        const mesh = batches[t.shape + (Math.abs(t.z - playerZ) < 110 ? 0 : 4)];
+        E.set(t.tilt * 0.4, t.rot, t.tilt);
+        Q.setFromEuler(E);
+        P.set(t.x, t.ground - 0.08, t.z);
+        S.set(t.s, t.s * (0.96 + 0.5 * (t.tint - 0.86)), t.s);
+        M.compose(P, Q, S);
+        const index = mesh.count++;
+        mesh.setMatrixAt(index, M);
+        const frost = t.frost ? 0.15 : 0;
+        C.setRGB(t.tint + frost, t.tint + frost, t.tint + frost);
+        mesh.setColorAt(index, C);
+      }
+    }
+    for (const mesh of batches) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
   // 碰撞查询：玩家附近行带的树
+  const nearby = [];
   function nearTrees(z) {
-    const out = [];
+    nearby.length = 0;
     const k = Math.max(0, Math.floor(-z / CFG.CHUNK_LEN));
     for (let kk = Math.max(0, k - 1); kk <= k + 1; kk++) {
       const arr = chunkTrees.get(kk);
-      if (arr) for (const t of arr) out.push(t);
+      if (arr) for (const t of arr) nearby.push(t);
     }
-    return out;
+    return nearby;
   }
 
   function reset(newSeed) {
@@ -1048,8 +1204,8 @@ function makeTrees(scene, seed) {
   }
 
   function setVisible(v) {
-    pineMesh.visible = v;
-    deadMesh.visible = v;
+    for (const mesh of batches) mesh.visible = v;
+    poles.visible = flags.visible = v;
   }
 
   return { syncChunks, rebuildInstances, nearTrees, reset, setVisible };
@@ -1164,6 +1320,8 @@ function makeParticles(scene) {
   const dMeta = [];
   const BOX = { x: 70, y: 44, z: 80 };
   function resetDrift(cx, cy, cz) {
+    sLife.fill(0);
+    sHead = 0;
     for (let i = 0; i < CFG.DRIFT_MAX; i++) {
       drift.pos[i * 3] = cx + (Math.random() - 0.5) * BOX.x * 2;
       drift.pos[i * 3 + 1] = cy + (Math.random() - 0.5) * BOX.y;
@@ -1202,6 +1360,61 @@ function makeParticles(scene) {
     sprayPoints: spray.pts,
     driftPoints: drift.pts,
   };
+}
+
+// Fixed-size strips following the two grounded tails. Each contact fades in place.
+function makeTracks(scene) {
+  const capacity = 420;
+  const positions = new Float32Array(capacity * 12 * 3);
+  const born = new Float32Array(capacity * 12);
+  const geo = new THREE.BufferGeometry();
+  const position = new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage);
+  const stamps = new THREE.BufferAttribute(born, 1).setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('position', position);
+  geo.setAttribute('born', stamps);
+  const material = new THREE.ShaderMaterial({
+    uniforms: { time: terrainTimeUniform },
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    vertexShader: 'attribute float born; uniform float time; varying float fade; void main(){fade=1.-smoothstep(1.,5.,time-born); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+    fragmentShader: 'varying float fade; void main(){gl_FragColor=vec4(.29,.46,.59,fade*.36);}',
+  });
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  let cursor = 0, count = 0, started = false;
+  const prev = [new THREE.Vector3(), new THREE.Vector3()];
+  function reset() {
+    count = cursor = 0; started = false;
+    geo.setDrawRange(0, 0);
+  }
+  function put(index, point, dx, dz, stamp) {
+    position.setXYZ(index, point.x + dx, point.y + 0.015, point.z + dz);
+    born[index] = stamp;
+  }
+  function append(tails, heading, now) {
+    if (started && prev[0].distanceToSquared(tails[0]) < 0.09) return;
+    if (started) {
+      const dx = Math.cos(heading) * 0.038, dz = -Math.sin(heading) * 0.038;
+      let v = cursor * 12;
+      for (let i = 0; i < 2; i++) {
+        const a = prev[i], b = tails[i];
+        put(v++, a, -dx, -dz, now);
+        put(v++, a, dx, dz, now);
+        put(v++, b, -dx, -dz, now);
+        put(v++, b, -dx, -dz, now);
+        put(v++, a, dx, dz, now);
+        put(v++, b, dx, dz, now);
+      }
+      position.needsUpdate = stamps.needsUpdate = true;
+      cursor = (cursor + 1) % capacity;
+      count = Math.min(capacity, count + 1);
+      geo.setDrawRange(0, count * 12);
+    }
+    prev[0].copy(tails[0]); prev[1].copy(tails[1]); started = true;
+  }
+  reset();
+  return { append, reset };
 }
 
 
@@ -1286,7 +1499,7 @@ function buildSkier(scene, seed) {
   const body = new THREE.Group();          // 下蹲偏移 / 摔倒翻滚
   root.add(body);
 
-  const HIP_Y = 0.88, HIP_X = 0.115;
+  const HIP_Y = 0.88, HIP_X = 0.18;
   function buildLeg(side) {
     const hip = new THREE.Group();
     hip.position.set(side * HIP_X, HIP_Y, 0);
@@ -1355,7 +1568,8 @@ function buildSkier(scene, seed) {
   const zipper = box(0.026, 0.30, 0.012, MAT.jacketDark);
   zipper.position.set(0, 0.19, -0.158);
   zipper.rotation.x = 0.06;
-  const pack = box(0.25, 0.31, 0.15, MAT.pack);
+  const pack = capsule(0.12, 0.14, MAT.pack, 10);
+  pack.scale.set(1.04, 1, 0.68);
   pack.position.set(0, 0.22, 0.155);
   const bedroll = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.058, 0.27, 10), MAT.bedroll);
   bedroll.rotation.z = Math.PI / 2;
@@ -1364,6 +1578,9 @@ function buildSkier(scene, seed) {
     tGeo(new THREE.SphereGeometry(0.078, 10, 8), -0.155, 0.36, 0, 0),
     tGeo(new THREE.SphereGeometry(0.078, 10, 8), 0.155, 0.36, 0, 0),
   ], MAT.jacketDark);
+  const packBand = box(0.235, 0.024, 0.15, MAT.jacketDark);
+  packBand.position.set(0, 0.19, 0.18);
+  torso.add(packBand);
   torso.add(chestLow, chestTop, zipper, pack, bedroll, shoulders);
 
   // 头部
@@ -1439,19 +1656,32 @@ function buildSkier(scene, seed) {
   let crash = null;          // 摔倒运动状态
   const freeSkis = [];       // 飞出的雪板
 
+  const tails = [new THREE.Vector3(), new THREE.Vector3()];
+  const groundPoint = new THREE.Vector3();
+  const sample = new THREE.Vector3();
+  const legs = [legL, legR];
   function update(st, dt, time) {
-    root.position.set(st.x, st.y, st.z);   // 跟随物理状态
     if (st.crashed) { updateCrash(dt); return; }
-    const c = U.clamp(0.24 + st.compression * 0.55 + st.tuck * 0.5, 0, 1.15);
+    root.position.set(st.x, st.y, st.z);
+    const cs = Math.cos(st.heading), sn = Math.sin(st.heading);
+    const tip = terrainHeight(st.x - sn * 0.82, st.z - cs * 0.82, seed);
+    const tail = terrainHeight(st.x + sn * 0.82, st.z + cs * 0.82, seed);
+    const right = terrainHeight(st.x + cs * HIP_X, st.z - sn * HIP_X, seed);
+    const left = terrainHeight(st.x - cs * HIP_X, st.z + sn * HIP_X, seed);
+    root.position.y = (left + right) * 0.5;
+    root.rotation.set(Math.atan2(tip - tail, 1.64), st.heading,
+      Math.atan2(right - left, 2 * HIP_X), 'YXZ');
+    const c = U.clamp(0.44 + st.compression * 0.55 + st.tuck * 0.5, 0, 1.15);
     const thighPitch = 0.18 + c * 0.62;
     const kneePitch = 0.22 + c * 1.6;
-    const bootPitch = 0.04 + c * 0.98;
+    const bootPitch = kneePitch - thighPitch;
     // 腿部链路缩短量 = 髋部下坠量（保证雪板贴雪）
     const legReach = 0.40 * Math.cos(thighPitch) + 0.40 * Math.cos(kneePitch - thighPitch);
     body.position.y = -(0.80 - legReach);
     body.rotation.set(0, 0, 0);
 
-    for (const leg of [legL, legR]) {
+    for (const leg of legs) {
+      leg.hip.position.set(leg === legL ? -HIP_X : HIP_X, HIP_Y, 0);
       leg.hip.rotation.x = -thighPitch;
       leg.knee.rotation.x = kneePitch;
       leg.bootG.rotation.x = -bootPitch;
@@ -1463,11 +1693,24 @@ function buildSkier(scene, seed) {
     legL.ski.rotation.y = -0.05;
     legR.ski.rotation.y = 0.05;
 
-    // 航向 + 侧倾（rotation 顺序 YZX：先朝向再滚转）
-    root.rotation.order = 'YZX';
-    root.rotation.y = st.heading;
-    root.rotation.z = st.lean;
-
+    body.position.x = -st.lean * 0.20;
+    for (let i = 0; i < legs.length; i++) {
+      const leg = legs[i];
+      leg.ski.updateWorldMatrix(true, false);
+      leg.ski.localToWorld(sample.set(0, -0.024, 0.05));
+      // Correct both height and lateral offset in hip-parent space, keeping boots planted.
+      groundPoint.copy(sample);
+      groundPoint.x -= cs * body.position.x;
+      groundPoint.z += sn * body.position.x;
+      groundPoint.y = terrainHeight(groundPoint.x, groundPoint.z, seed) + 0.008;
+      body.worldToLocal(groundPoint);
+      body.worldToLocal(sample);
+      leg.hip.position.add(groundPoint.sub(sample));
+      leg.ski.updateWorldMatrix(true, false);
+      leg.ski.localToWorld(tails[i].set(0, -0.018, 0.82));
+      tails[i].y = terrainHeight(tails[i].x, tails[i].z, seed) + 0.016;
+    }
+    torso.rotation.z = st.lean * 0.82;
     // 躯干反弓（胸朝坡下、肩指向弯外）+ 前倾
     torso.rotation.y = st.steer * 0.4;
     torso.rotation.x = -(0.14 + st.tuck * 0.34 + c * 0.22);
@@ -1476,7 +1719,7 @@ function buildSkier(scene, seed) {
 
     // 手臂：低速平衡展开 → 高速收拢抱杖
     const t = st.tuck;
-    const spread = 1.02 - t * 0.62;
+    const spread = 0.70 - t * 0.39;
     armL.arm.rotation.z = -spread;
     armR.arm.rotation.z = spread;
     armL.arm.rotation.x = -(0.12 + t * 0.42);
@@ -1538,19 +1781,20 @@ function buildSkier(scene, seed) {
   function updateCrash(dt) {
     if (!crash) return;
     crash.vel.y -= 9.81 * dt;
-    body.position.addScaledVector(crash.vel, dt);
+    root.localToWorld(groundPoint.copy(body.position));
+    groundPoint.addScaledVector(crash.vel, dt);
+    const floor = terrainHeight(groundPoint.x, groundPoint.z, seed) + 0.25;
     body.rotation.x += crash.ang.x * dt;
     body.rotation.y += crash.ang.y * dt;
     body.rotation.z += crash.ang.z * dt;
     // 地面反弹衰减
-    const gy = terrainHeight(root.position.x, root.position.z, seed);
-    const floor = Math.max(gy, gy) ;
-    if (body.position.y < floor + 0.25) {
-      body.position.y = floor + 0.25;
+    if (groundPoint.y < floor) {
+      groundPoint.y = floor;
       crash.vel.y = Math.abs(crash.vel.y) * 0.25;
       crash.vel.x *= 0.82; crash.vel.z *= 0.82;
       crash.ang.multiplyScalar(0.86);
     }
+    body.position.copy(root.worldToLocal(groundPoint));
     // 飞出的雪板
     for (const fs of freeSkis) {
       fs.vel.y -= 9.81 * dt;
@@ -1568,7 +1812,9 @@ function buildSkier(scene, seed) {
     }
   }
 
-  function reset() {
+  function reset(newSeed = seed) {
+    seed = newSeed;
+    AN.polePhase = AN.vibT = 0;
     crash = null;
     body.position.set(0, 0, 0);
     body.rotation.set(0, 0, 0);
@@ -1582,7 +1828,7 @@ function buildSkier(scene, seed) {
     freeSkis.length = 0;
   }
 
-  return { root, body, update, startCrash, reset, MAT };
+  return { root, body, tails, update, startCrash, reset, MAT };
 }
 
 
@@ -1776,6 +2022,9 @@ function makeInput(el) {
   window.addEventListener('keyup', (e) => {
     if (['ArrowLeft', 'a', 'A', 'ArrowRight', 'd', 'D'].includes(e.key)) inp._key = 0;
   });
+  inp.reset = () => { inp._ptrX = null; inp._key = 0; inp.steer = 0; };
+  el.addEventListener('blur', inp.reset);
+  el.addEventListener('touchcancel', inp.reset);
   inp.update = update;
   return inp;
 }
@@ -1784,7 +2033,7 @@ function makeInput(el) {
 /* ================= postfx.js ================= */
 /* ================= postfx.js ================= */
 // 自研后处理链（不依赖 three addons）：
-// 场景(HDR) → 提亮(1/4) → 双向高斯模糊 → 合成(泛光+ACES色调映射+FXAA+暗角+颗粒)
+// 场景(HDR) → 提亮(1/4) → 双向高斯模糊 → 合成(泛光+ACES色调映射+边缘平滑+暗角+颗粒)
 'use strict';
 
 function makePostFX(renderer, scene, camera) {
@@ -1795,16 +2044,11 @@ function makePostFX(renderer, scene, camera) {
   quad.frustumCulled = false;
   QUAD.add(quad);
 
-  let enabled = true;
   let W = 2, H = 2;
 
-  const halfFloat = (function () {
-    try {
-      const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
-      rt.dispose();
-      return true;
-    } catch (e) { return false; }
-  })();
+  const gl = renderer.getContext();
+  const halfFloat = renderer.capabilities.isWebGL2 && !!gl.getExtension('EXT_color_buffer_float');
+  let quality = 2;
 
   const mkRT = (w, h, opt) => new THREE.WebGLRenderTarget(
     Math.max(2, Math.floor(w)), Math.max(2, Math.floor(h)),
@@ -1817,8 +2061,10 @@ function makePostFX(renderer, scene, camera) {
 
   let rtScene, rtA, rtB;
   function alloc() {
-    if (rtScene) { rtScene.dispose(); rtA.dispose(); rtB.dispose(); }
+    if (rtScene) rtScene.dispose();
+    if (rtA) { rtA.dispose(); rtB.dispose(); rtA = rtB = null; }
     rtScene = mkRT(W, H, halfFloat ? { type: THREE.HalfFloatType } : {});
+    if (quality < 2) return;
     rtA = mkRT(W / 4, H / 4, halfFloat ? { type: THREE.HalfFloatType, depthBuffer: false } : { depthBuffer: false });
     rtB = mkRT(W / 4, H / 4, halfFloat ? { type: THREE.HalfFloatType, depthBuffer: false } : { depthBuffer: false });
   }
@@ -1864,18 +2110,18 @@ function makePostFX(renderer, scene, camera) {
     `,
   });
 
-  // ---- 合成：泛光 + ACES + FXAA + 暗角 + 颗粒 ----
+  // ---- 合成：泛光 + ACES + 边缘平滑 + 暗角 + 颗粒 ----
   const compMat = new THREE.ShaderMaterial({
     uniforms: {
       tD: { value: null }, tB: { value: null },
       uBloom: { value: 0.55 }, uExposure: { value: 1.0 },
       uRcp: { value: new THREE.Vector2() }, uTime: { value: 0 },
-      uGrain: { value: 0.014 },
+      uGrain: { value: 0.003 }, uAA: { value: 1 },
     },
     vertexShader: VERT,
     fragmentShader: `
       uniform sampler2D tD, tB;
-      uniform float uBloom, uExposure, uTime, uGrain;
+      uniform float uBloom, uExposure, uTime, uGrain, uAA;
       uniform vec2 uRcp;
       varying vec2 vUv;
 
@@ -1900,33 +2146,18 @@ function makePostFX(renderer, scene, camera) {
       }
       float lumaOf(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
-      // FXAA（console 版）
-      vec3 fxaa(sampler2D tex, vec2 uv) {
-        vec3 m  = toOut(texture2D(tex, uv).rgb + texture2D(tB, uv).rgb * uBloom);
-        vec3 nw = toOut(texture2D(tex, uv + vec2(-1.0, -1.0) * uRcp).rgb);
-        vec3 ne = toOut(texture2D(tex, uv + vec2( 1.0, -1.0) * uRcp).rgb);
-        vec3 sw = toOut(texture2D(tex, uv + vec2(-1.0,  1.0) * uRcp).rgb);
-        vec3 se = toOut(texture2D(tex, uv + vec2( 1.0,  1.0) * uRcp).rgb);
-        float lm = lumaOf(m), lnw = lumaOf(nw), lne = lumaOf(ne), lsw = lumaOf(sw), lse = lumaOf(se);
-        float lMin = min(lm, min(min(lnw, lne), min(lsw, lse)));
-        float lMax = max(lm, max(max(lnw, lne), max(lsw, lse)));
-        if (lMax - lMin < 0.06 * lMax + 0.02) return m;
-        vec2 dir = vec2(-((lnw + lne) - (lsw + lse)), ((lnw + lsw) - (lne + lse)));
-        float rcpReduce = 1.0 / (8.0 * (abs(dir.x) + abs(dir.y)) + 0.0001);
-        dir = normalize(dir + vec2(0.0001)) * min(abs(dir.x), abs(dir.y)) * rcpReduce * uRcp * 8.0;
-        vec3 a = toOut(texture2D(tex, uv + dir * (1.0 / 3.0 - 0.5)).rgb);
-        vec3 b = toOut(texture2D(tex, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
-        vec3 c = a + b;
-        vec3 d = toOut(texture2D(tex, uv + dir * -0.5).rgb);
-        vec3 e = toOut(texture2D(tex, uv + dir *  0.5).rgb);
-        c = (c + d + e) * 0.25;
-        float lc = lumaOf(c);
-        if (lc < lMin || lc > lMax) return m;
-        return c;
-      }
-
       void main() {
-        vec3 col = fxaa(tD, vUv);
+        vec3 hdr = texture2D(tD, vUv).rgb;
+        if (uAA > 0.5) {
+          vec3 l = texture2D(tD, vUv - vec2(uRcp.x, 0.)).rgb;
+          vec3 r = texture2D(tD, vUv + vec2(uRcp.x, 0.)).rgb;
+          vec3 u = texture2D(tD, vUv + vec2(0., uRcp.y)).rgb;
+          vec3 d = texture2D(tD, vUv - vec2(0., uRcp.y)).rgb;
+          float edge = abs(lumaOf(l-r)) + abs(lumaOf(u-d));
+          hdr = mix(hdr, (l+r+u+d)*0.25, 0.35*smoothstep(0.12, 0.55, edge));
+        }
+        if (uBloom > 0.0) hdr += texture2D(tB, vUv).rgb * uBloom;
+        vec3 col = toOut(hdr);
         // 质感调色：柔和对比 + 饱和 + 冷暖分区（阴影偏蓝、高光偏暖）
         col = mix(col, col * col * (3.0 - 2.0 * col), 0.20);
         float lu = lumaOf(col);
@@ -1945,7 +2176,10 @@ function makePostFX(renderer, scene, camera) {
     `,
   });
 
-  function setSize(w, h) { W = w; H = h; alloc(); }
+  function setSize(w, h) {
+    if (rtScene && W === w && H === h && !!rtA === (quality === 2)) return;
+    W = w; H = h; alloc();
+  }
 
   function pass(mat, target) {
     quad.material = mat;
@@ -1954,36 +2188,33 @@ function makePostFX(renderer, scene, camera) {
   }
 
   function render(time) {
-    if (!enabled || !rtScene) {
-      renderer.setRenderTarget(null);
-      renderer.render(scene, camera);
-      return;
-    }
     compMat.uniforms.uTime.value = time;
     compMat.uniforms.uRcp.value.set(1 / W, 1 / H);
 
     renderer.setRenderTarget(rtScene);
     renderer.render(scene, camera);
 
-    brightMat.uniforms.tD.value = rtScene.texture;
-    pass(brightMat, rtA);
+    if (rtA) {
+      brightMat.uniforms.tD.value = rtScene.texture;
+      pass(brightMat, rtA);
 
-    blurMat.uniforms.tD.value = rtA.texture;
-    blurMat.uniforms.uDir.value.set(1.35 / rtA.width, 0);
-    pass(blurMat, rtB);
-    blurMat.uniforms.tD.value = rtB.texture;
-    blurMat.uniforms.uDir.value.set(0, 1.35 / rtA.height);
-    pass(blurMat, rtA);
+      blurMat.uniforms.tD.value = rtA.texture;
+      blurMat.uniforms.uDir.value.set(1.35 / rtA.width, 0);
+      pass(blurMat, rtB);
+      blurMat.uniforms.tD.value = rtB.texture;
+      blurMat.uniforms.uDir.value.set(0, 1.35 / rtA.height);
+      pass(blurMat, rtA);
 
+    }
     compMat.uniforms.tD.value = rtScene.texture;
-    compMat.uniforms.tB.value = rtA.texture;
+    compMat.uniforms.tB.value = rtA ? rtA.texture : null;
+    compMat.uniforms.uBloom.value = rtA ? 0.12 : 0;
+    compMat.uniforms.uAA.value = quality > 0 ? 1 : 0;
     pass(compMat, null);
   }
 
-  function setEnabled(on) { enabled = on; }
-
-  alloc();
-  return { render, setSize, setEnabled, get enabled() { return enabled; } };
+  function setQuality(q) { quality = q; }
+  return { render, setSize, setQuality, get enabled() { return true; } };
 }
 
 
@@ -2220,6 +2451,7 @@ function makeUI(handlers) {
   const el = {
     hud: $('hud'), boot: $('boot'), over: $('over'), board: $('board'), pause: $('pause'),
     loading: $('loading'), toast: $('toast'),
+    stage: $('hud-stage'), next: $('hud-next'), splits: $('splits'),
     speed: $('hud-speed'), dist: $('hud-dist'), best: $('hud-best'),
     name: $('inp-name'), start: $('btn-start'), boardBoot: $('btn-board-boot'),
     oScore: $('over-score'), oSub: $('over-sub'), oRank: $('over-rank'),
@@ -2233,12 +2465,12 @@ function makeUI(handlers) {
 
   function bind() {
     el.start.addEventListener('click', () => {
-      const name = sanitizeName(el.name.value);
-      if (!name) { el.name.classList.add('shake'); setTimeout(() => el.name.classList.remove('shake'), 400); el.name.focus(); return; }
+      const name = sanitizeName(el.name.value) || '无名滑雪者';
       localStorage.setItem(CFG.NAME_KEY, name);
       handlers.onStart(name);
     });
     el.name.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.start.click(); });
+    $('btn-new').addEventListener('click', handlers.onNew);
     el.retry.addEventListener('click', () => handlers.onRetry());
     el.resume.addEventListener('click', () => handlers.onResume());
     el.quit.addEventListener('click', () => handlers.onQuit());
@@ -2291,18 +2523,33 @@ function makeUI(handlers) {
       el.hud.hidden = true; el.over.hidden = true; el.board.hidden = true; el.pause.hidden = true;
       el.boot.hidden = false;
       const saved = localStorage.getItem(CFG.NAME_KEY);
-      if (saved) { el.name.value = saved; }
+      if (saved && saved !== '无名滑雪者') el.name.value = saved;
     },
     startRun() {
       el.boot.hidden = true; el.over.hidden = true; el.board.hidden = true;
       el.hud.hidden = false;
     },
-    hud(speedKmh, dist, best) {
+    hud(speedKmh, dist, best, stage, next) {
+      el.stage.textContent = stage;
+      el.next.textContent = next;
       el.speed.textContent = Math.round(speedKmh);
       el.dist.textContent = Math.floor(dist);
       el.best.textContent = best > 0 ? Math.floor(best) + 'm' : '—';
     },
-    showOver(score, isBest) {
+    showOver(score, isBest, splits) {
+      el.splits.replaceChildren();
+      for (const split of splits.slice(-3)) {
+        const row = document.createElement('div');
+        const name = document.createElement('span');
+        const time = document.createElement('b');
+        name.textContent = split.label;
+        time.textContent = split.time.toFixed(2) + ' 秒';
+        if (split.delta !== null) {
+          time.textContent += '（' + (split.delta > 0 ? '+' : '') + split.delta.toFixed(2) + '）';
+        }
+        row.append(name, time);
+        el.splits.append(row);
+      }
       el.hud.hidden = true;
       el.oScore.textContent = Math.floor(score);
       el.oSub.textContent = isBest ? '新纪录！' : '再试一次，走刃更顺一点';
@@ -2338,7 +2585,6 @@ function makeUI(handlers) {
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-    if (!renderer.capabilities.isWebGL2 && !renderer.capabilities.isWebGL1) throw new Error('no webgl');
   } catch (e) {
     document.getElementById('loading').textContent = '此设备/浏览器不支持 WebGL，无法运行游戏';
     return;
@@ -2349,7 +2595,7 @@ function makeUI(handlers) {
 
   // ---- 场景 ----
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(new THREE.Color('#dcc6a6').convertSRGBToLinear(), 40, 420);
+  scene.fog = new THREE.Fog(new THREE.Color('#c5d7e3').convertSRGBToLinear(), 75, 420);
   const camera = new THREE.PerspectiveCamera(CFG.CAM_FOV_BASE, 1, 0.1, 3200);
 
   // ---- 光照：侧后方暖阳（顺光照亮雪面）+ 天空环境光 ----
@@ -2364,7 +2610,7 @@ function makeUI(handlers) {
   sun.shadow.camera.near = 10; sun.shadow.camera.far = 320;
   sun.shadow.camera.updateProjectionMatrix();
   sun.shadow.bias = -0.00055;
-  sun.shadow.normalBias = 1.2;
+  sun.shadow.normalBias = 0.055;
   scene.add(sun, sun.target);
   const hemi = new THREE.HemisphereLight(
     new THREE.Color('#cfe0f5').convertSRGBToLinear(),
@@ -2378,6 +2624,7 @@ function makeUI(handlers) {
   const terrain = makeTerrain(scene, seed);
   const treesMod = makeTrees(scene, seed);
   const particles = makeParticles(scene);
+  const tracks = makeTracks(scene);
   const skier = buildSkier(scene, seed);
   const postfx = makePostFX(renderer, scene, camera);
   const phys = makePhysics(seed);
@@ -2387,7 +2634,8 @@ function makeUI(handlers) {
 
   const ui = makeUI({
     onStart(name) { sfx.init(); sfx.click(); startRun(); },
-    onRetry() { sfx.click(); startRun(); },
+    onRetry() { sfx.click(); startRun(false); },
+    onNew() { sfx.click(); startRun(); },
     onResume() { sfx.click(); togglePause(false); },
     onQuit() { sfx.click(); toMenu(); },
     onMute() { sfx.setMuted(!sfx.muted); ui.setMuteIcon(sfx.muted); },
@@ -2402,9 +2650,12 @@ function makeUI(handlers) {
   let quality = 2;   // 2 高 / 1 中 / 0 低
   function applyQuality(q) {
     quality = q;
-    if (q === 2) { renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75)); sun.castShadow = true; postfx.setEnabled(true); }
-    else if (q === 1) { renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25)); sun.castShadow = true; postfx.setEnabled(true); }
-    else { renderer.setPixelRatio(1); sun.castShadow = false; postfx.setEnabled(false); }
+    const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.4 : 1.6);
+    renderer.setPixelRatio(dpr * [0.75, 0.90, 1][q]);
+    sun.castShadow = q > 0;
+    const size = q === 2 ? SHADOW_RES : SHADOW_RES / 2;
+    sun.shadow.mapSize.set(size, size);
+    postfx.setQuality(q);
     if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     onResize();
   }
@@ -2414,36 +2665,66 @@ function makeUI(handlers) {
   let state = 'MENU';          // MENU / RUN / CRASH / OVER / PAUSE
   let pausedFrom = 'RUN';
   let timeScale = 1;
-  let menuT = 0;
-  let fpsEma = 60, qTimer = 0, upStreak = 0, lastUpAt = -1e9;
+  const menuLane = {};
+  let frameSeconds = 1 / 60, qTimer = 0, upStreak = 0, lastUpAt = -1e9;
   let lastPk = -1;
-  let runBest = board.localBest();
+  let runBest = board.localBest(), hudAt = 0;
   let trauma = 0;              // 镜头抖动能量
+
+  const stages = [
+    { name: '开阔坡', end: 42 }, { name: '连续弯', end: 222 }, { name: '林间分线', end: COURSE_LENGTH },
+  ];
+  const splits = [], routeBests = [];
+  let stageIndex = 0, sector = 0, elapsed = 0, stageStart = 0, runId = 0;
+  function stageEnd() { return sectorDistance(sector, stages[stageIndex].end); }
+  function timeStep(dt, oldDistance) {
+    elapsed += dt;
+    const end = stageEnd(), distance = phys.st.dist;
+    if (distance < end) return;
+    const crossing = elapsed - dt * (distance - end) / Math.max(0.001, distance - oldDistance);
+    const time = crossing - stageStart;
+    const index = sector * stages.length + stageIndex;
+    const best = routeBests[index];
+    splits.push({ label: end + ' m · ' + stages[stageIndex].name, time, delta: best == null ? null : time - best });
+    routeBests[index] = best == null ? time : Math.min(best, time);
+    stageStart = crossing;
+    if (++stageIndex === stages.length) { stageIndex = 0; sector++; }
+  }
 
   function refreshWorld() {
     terrain.ensure(phys.st.z);
     const [kLo, kHi] = terrain.rangeFor(phys.st.z);
     treesMod.syncChunks(kLo, kHi);
-    treesMod.rebuildInstances();
+    treesMod.rebuildInstances(phys.st.z);
     lastPk = Math.max(0, Math.floor(-phys.st.z / CFG.CHUNK_LEN));
   }
 
   function hardReset(freshSeed) {
     if (freshSeed) seed = (Math.random() * 2147483647) | 0;
     phys.reset(seed);
-    skier.reset();
+    skier.reset(seed);
+    tracks.reset();
+    sprayTime = 0;
+    input.reset();
+    accum = 0;
+    Object.assign(prevState, phys.st);
     terrain.reset(seed);
     treesMod.reset(seed);
     lastPk = -1;
     refreshWorld();
-    // 近处地形同步构建（约 3 块），远处交给每帧的异步队列
-    for (let i = 0; i < 3 && terrain.pending; i++) terrain.update(60);
+    terrain.finishNearest();
     particles.resetDrift(phys.st.x, phys.st.y + 10, phys.st.z - 20);
     snapCamera();
   }
 
-  function startRun() {
-    hardReset(true);
+  function startRun(freshSeed = true) {
+    hardReset(freshSeed);
+    if (freshSeed) routeBests.length = 0;
+    runId++;
+    splits.length = 0;
+    hudAt = 0;
+    stageIndex = sector = elapsed = stageStart = 0;
+    clock.getDelta();
     timeScale = 1; trauma = 0;
     state = 'RUN';
     treesMod.setVisible(true);
@@ -2453,14 +2734,14 @@ function makeUI(handlers) {
 
   function toMenu() {
     hardReset(true);
-    timeScale = 1; state = 'MENU'; menuT = 0;
-    treesMod.setVisible(false);   // 菜单背景走纯净雪坡，无穿模
+    timeScale = 1; state = 'MENU';
+    treesMod.setVisible(true);
     ui.showBoot();
   }
 
   function togglePause(on) {
     if (on && state === 'RUN') { pausedFrom = state; state = 'PAUSE'; ui.showPause(true); }
-    else if (!on && state === 'PAUSE') { state = pausedFrom; ui.showPause(false); }
+    else if (!on && state === 'PAUSE') { clock.getDelta(); input.reset(); state = pausedFrom; ui.showPause(false); }
   }
 
   // ---- 撞树流程 ----
@@ -2481,19 +2762,21 @@ function makeUI(handlers) {
     timeScale = 1;
     const score = Math.floor(phys.st.dist);
     const isBest = board.setLocalBest(score);
-    ui.showOver(score, isBest);
+    const partial = { label: '本段 · ' + stages[stageIndex].name + '（未完成）', time: elapsed - stageStart, delta: null };
+    ui.showOver(score, isBest, [...splits, partial]);
     if (isBest) sfx.newBest(); else sfx.over();
     const name = localStorage.getItem(CFG.NAME_KEY) || '无名滑雪者';
+    const submittingRun = runId;
     const res = await board.submit(name, score);
+    if (submittingRun !== runId || state !== 'OVER') return;
     if (res.ok && res.cloud && res.rank) ui.setRank(`全球第 ${res.rank} 名`);
     else if (res.ok && !res.cloud) ui.setRank('已记入本机排行榜');
     else if (!res.ok && res.cloud) ui.setRank('云端暂不可达，成绩已存本机');
   }
 
   // ---- 碰撞 & 擦树 ----
-  function checkTrees() {
+  function checkTrees(list) {
     const st = phys.st;
-    const list = treesMod.nearTrees(st.z);
     for (const t of list) {
       const dz = t.z - st.z;
       if (dz < -3 || dz > 6) {
@@ -2518,13 +2801,15 @@ function makeUI(handlers) {
   let camFov = CFG.CAM_FOV_BASE;
   function snapCamera() {
     const st = phys.st;
+    camFov = CFG.CAM_FOV_BASE;
+    camera.fov = camFov;
+    camera.updateProjectionMatrix();
     camPos.set(st.x, st.y + CFG.CAM_UP, st.z + CFG.CAM_BACK);
     camLook.set(st.x, st.y + 1, st.z - 10);
     camera.position.copy(camPos);
     camera.lookAt(camLook);
   }
-  function updateCamera(dt) {
-    const st = phys.st;
+  function updateCamera(dt, st) {
     let fx = st.vx, fz = st.vz;
     const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
     const px = st.x, py = st.y, pz = st.z;
@@ -2539,7 +2824,7 @@ function makeUI(handlers) {
     camPos.y = U.damp(camPos.y, dy, 5, dt);
     camPos.z = U.damp(camPos.z, dz, 8, dt);
     camLook.x = U.damp(camLook.x, px + fx * CFG.CAM_AHEAD, 11, dt);
-    camLook.y = U.damp(camLook.y, py + 1.15, 9, dt);
+    camLook.y = U.damp(camLook.y, terrainHeight(px + fx * CFG.CAM_AHEAD, pz + fz * CFG.CAM_AHEAD, seed) + 1.4, 8, dt);
     camLook.z = U.damp(camLook.z, pz + fz * CFG.CAM_AHEAD, 11, dt);
 
     // 抖动（trauma²）
@@ -2561,7 +2846,7 @@ function makeUI(handlers) {
   // ---- 太阳阴影跟随（贴图元对齐防闪烁）----
   function updateSun() {
     const st = phys.st;
-    const texel = (SE * 2) / SHADOW_RES;
+    const texel = (SE * 2) / sun.shadow.mapSize.x;
     const tx = Math.round(st.x / texel) * texel;
     const tz = Math.round(st.z / texel) * texel;
     const ty = terrainHeight(tx, tz, seed);
@@ -2574,66 +2859,63 @@ function makeUI(handlers) {
   }
 
   // ---- 雪雾发射 ----
-  function emitSprayAtSkis() {
-    const st = phys.st;
-    const turn = Math.abs(st.steer) * (0.3 + st.speedN);
-    const power = U.clamp(st.slip * 1.0 + turn * 0.85 + st.speedN * 0.15, 0, 1.5);
-    if (power < 0.06) return;
-    const bx = Math.sin(st.heading), bz = Math.cos(st.heading);   // 后方
-    const rx = -Math.cos(st.heading), rz = Math.sin(st.heading);  // 右侧
-    const side = -Math.sign(st.latA || 1);                        // 雪往弯外喷
-    particles.emitSpray(
-      st.x - bx * 0.85, st.y, st.z - bz * 0.85,
-      bx, bz, rx * side, rz * side,
-      power * 0.75 + 0.2, st.speed
-    );
-    particles.emitSpray(
-      st.x - bx * 0.7 + rx * 0.28, st.y, st.z - bz * 0.7 + rz * 0.28,
-      bx, bz, rx * side, rz * side,
-      power * 0.5, st.speed
-    );
+  let sprayTime = 0;
+  function emitSprayAtSkis(st, dt) {
+    const turn = Math.abs(st.steer) * (0.35 + st.speedN);
+    const power = U.clamp(st.slip + turn * 0.85, 0, 1.5);
+    sprayTime += dt;
+    if (sprayTime < 1 / 45) return;
+    const bursts = Math.min(3, Math.floor(sprayTime * 45));
+    sprayTime %= 1 / 45;
+    if (power < 0.05) return;
+    const sn = Math.sin(st.heading), cs = Math.cos(st.heading);
+    const side = Math.sign(st.lean);
+    for (const tail of skier.tails) {
+      for (let i = 0; i < bursts; i++) {
+        particles.emitSpray(tail.x, tail.y, tail.z, sn, cs, side * cs, -side * sn, power * 0.7, st.speed);
+      }
+    }
   }
 
   // ---- 主循环 ----
   const clock = new THREE.Clock();
   let accum = 0;
   const H = 1 / 120;
-  const animState = {
-    x: 0, y: 0, z: 0, heading: 0, lean: 0, steer: 0, steerRate: 0,
-    speed: 0, speedN: 0, tuck: 0, compression: 0, crashed: false,
-  };
+  const animState = {}, prevState = {};
+  const interpolated = ['x', 'y', 'z', 'vx', 'vz', 'heading', 'lean', 'steer', 'compression', 'tuck'];
 
   function frame() {
     requestAnimationFrame(frame);
-    let dt = Math.min(clock.getDelta(), 1 / 30);
-    const rawDt = dt;
-    fpsEma = fpsEma * 0.95 + (1 / Math.max(rawDt, 1e-4)) * 0.05;
-
-    if (state === 'PAUSE') { postfx.render(0); return; }
-
-    dt *= timeScale;
+    const rawDt = clock.getDelta();
+    if (state === 'PAUSE' || state === 'OVER') return;
+    const dt = Math.min(rawDt, 0.12) * timeScale;
+    if (rawDt > 0) frameSeconds = U.damp(frameSeconds, Math.min(rawDt, 1), 2, rawDt);
     terrainTimeUniform.value += dt;
-
-    // 物理子步
-    if (state === 'RUN' || state === 'MENU' || state === 'CRASH') {
-      if (state === 'RUN') {
-        input.update();
-        accum += dt;
-        let guard = 0;
-        while (accum >= H && guard++ < 12) {
-          phys.step(H, input.steer);
-          accum -= H;
+    if (state === 'RUN' || state === 'MENU') {
+      input.update();
+      accum += dt;
+      const candidates = state === 'RUN' ? treesMod.nearTrees(phys.st.z) : null;
+      while (accum + 1e-10 >= H && !phys.st.crashed) {
+        Object.assign(prevState, phys.st);
+        let steer = input.steer;
+        if (state === 'MENU') {
+          const ahead = U.clamp(phys.st.speed * 0.46, 5, 15);
+          courseAt(phys.st.dist + ahead, seed, menuLane);
+          const heading = -Math.atan2(menuLane.x - phys.st.x, ahead);
+          steer = U.clamp((phys.st.heading - heading) * 4.2, -1, 1);
         }
-        checkTrees();
-      } else if (state === 'MENU') {
-        menuT += dt;
-        phys.step(dt, Math.sin(menuT * 0.5) * 0.42);
-        if (phys.st.dist > 900) hardReset(true);
-      } else if (state === 'CRASH') {
-        phys.step(dt, 0);
-        crashTimer += rawDt;
-        if (crashTimer > CFG.CRASH_TIME) finishRun();
+        phys.step(H, steer);
+        accum = Math.max(0, accum - H);
+        if (state === 'RUN') {
+          timeStep(H, prevState.dist);
+          checkTrees(candidates);
+        }
       }
+      if (state === 'MENU' && phys.st.dist > 320) hardReset(true);
+    } else if (state === 'CRASH') {
+      phys.step(dt, 0);
+      crashTimer += rawDt;
+      if (crashTimer >= CFG.CRASH_TIME) finishRun();
     }
 
     // 世界跟随
@@ -2641,33 +2923,38 @@ function makeUI(handlers) {
 
     // 人物（复用状态对象，避免每帧分配）
     const st = phys.st;
-    animState.x = st.x; animState.y = st.y; animState.z = st.z;
-    animState.heading = st.heading; animState.lean = st.lean; animState.steer = st.steer;
-    animState.steerRate = st.steerRate; animState.speed = st.speed; animState.speedN = st.speedN;
-    animState.tuck = st.tuck; animState.compression = st.compression; animState.crashed = st.crashed;
+    Object.assign(animState, st);
+    if (!st.crashed) {
+      const alpha = U.sat(accum / H);
+      for (const key of interpolated) animState[key] = U.lerp(prevState[key], st[key], alpha);
+    }
     skier.update(animState, dt, terrainTimeUniform.value);
-
-    // 粒子 / 天空 / 光照 / 摄像机
-    if (!st.crashed) emitSprayAtSkis();
+    terrain.contact.value.set(animState.x, animState.z, Math.sin(animState.heading), Math.cos(animState.heading));
+    if (!st.crashed) {
+      tracks.append(skier.tails, animState.heading, terrainTimeUniform.value);
+      emitSprayAtSkis(animState, dt);
+    }
     particles.updateSpray(dt);
     particles.updateDrift(dt, camera.position);
     sfx.update(dt, st);
     sky.update(camera, dt, st.z);
-    updateSun();
-    updateCamera(dt);
+    if (quality > 0) updateSun();
+    updateCamera(dt, animState);
 
-    // HUD
-    if (state === 'RUN') {
-      ui.hud(st.speed * 3.6, st.dist, Math.max(runBest, st.dist));
+    // Keep DOM updates independent of the render frequency.
+    if (state === 'RUN' && elapsed >= hudAt) {
+      hudAt = elapsed + 0.08;
+      ui.hud(st.speed * 3.6, st.dist, runBest, stages[stageIndex].name,
+        '距分段点 ' + Math.max(0, Math.ceil(stageEnd() - st.dist)) + ' m');
     }
 
     // 自动降质（卡顿立即降）+ 缓慢升质（持续流畅才回升，带冷却防振荡）
     qTimer += rawDt;
     if (qTimer > 2) {
       qTimer = 0;
-      if (fpsEma < 45 && quality > 0) { applyQuality(quality - 1); upStreak = 0; }
+      if (frameSeconds > 1 / 45 && quality > 0) { applyQuality(quality - 1); upStreak = 0; }
     }
-    if (quality < 2 && fpsEma > 57) {
+    if (quality < 2 && frameSeconds < 1 / 57) {
       upStreak += rawDt;
       const now = performance.now() / 1000;
       if (upStreak > 8 && now - lastUpAt > 30) {
@@ -2689,7 +2976,7 @@ function makeUI(handlers) {
       terrain.ensure(st.z);
       const [kLo, kHi] = terrain.rangeFor(st.z);
       treesMod.syncChunks(kLo, kHi);
-      treesMod.rebuildInstances();
+      treesMod.rebuildInstances(phys.st.z);
     }
     terrain.update(3.5);   // 地形构建按预算分帧推进，不卡主循环
   }
@@ -2702,6 +2989,7 @@ function makeUI(handlers) {
     renderer.setSize(w, h);
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     postfx.setSize(size.x, size.y);
+    if (window.__SKI && (state === 'PAUSE' || state === 'OVER')) postfx.render(terrainTimeUniform.value);
   }
   window.addEventListener('resize', onResize);
   onResize();
@@ -2721,14 +3009,13 @@ function makeUI(handlers) {
   // ---- 启动 ----
   hardReset(true);
   ui.showBoot();
-  if (!board.isCloud) {
-    setTimeout(() => ui.toast('排行榜当前为本机模式，全球共享配置见 README', 3200), 800);
-  }
+
   // 调试钩子（开发/测试用）
   window.__SKI = {
     get state() { return state; },
     get seed() { return seed; },
-    phys, postfx, renderer, scene, camera, particles,
+    phys, postfx, renderer, scene, camera, particles, skier,
+    get quality() { return quality; },
     setQuality: applyQuality,
   };
   frame();

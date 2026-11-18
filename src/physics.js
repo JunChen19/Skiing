@@ -187,6 +187,9 @@ function makeInput(el) {
   window.addEventListener('keyup', (e) => {
     if (['ArrowLeft', 'a', 'A', 'ArrowRight', 'd', 'D'].includes(e.key)) inp._key = 0;
   });
+  inp.reset = () => { inp._ptrX = null; inp._key = 0; inp.steer = 0; };
+  el.addEventListener('blur', inp.reset);
+  el.addEventListener('touchcancel', inp.reset);
   inp.update = update;
   return inp;
 }

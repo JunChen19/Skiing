@@ -7,6 +7,7 @@ function makeUI(handlers) {
   const el = {
     hud: $('hud'), boot: $('boot'), over: $('over'), board: $('board'), pause: $('pause'),
     loading: $('loading'), toast: $('toast'),
+    stage: $('hud-stage'), next: $('hud-next'), splits: $('splits'),
     speed: $('hud-speed'), dist: $('hud-dist'), best: $('hud-best'),
     name: $('inp-name'), start: $('btn-start'), boardBoot: $('btn-board-boot'),
     oScore: $('over-score'), oSub: $('over-sub'), oRank: $('over-rank'),
@@ -20,12 +21,12 @@ function makeUI(handlers) {
 
   function bind() {
     el.start.addEventListener('click', () => {
-      const name = sanitizeName(el.name.value);
-      if (!name) { el.name.classList.add('shake'); setTimeout(() => el.name.classList.remove('shake'), 400); el.name.focus(); return; }
+      const name = sanitizeName(el.name.value) || '无名滑雪者';
       localStorage.setItem(CFG.NAME_KEY, name);
       handlers.onStart(name);
     });
     el.name.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.start.click(); });
+    $('btn-new').addEventListener('click', handlers.onNew);
     el.retry.addEventListener('click', () => handlers.onRetry());
     el.resume.addEventListener('click', () => handlers.onResume());
     el.quit.addEventListener('click', () => handlers.onQuit());
@@ -78,18 +79,33 @@ function makeUI(handlers) {
       el.hud.hidden = true; el.over.hidden = true; el.board.hidden = true; el.pause.hidden = true;
       el.boot.hidden = false;
       const saved = localStorage.getItem(CFG.NAME_KEY);
-      if (saved) { el.name.value = saved; }
+      if (saved && saved !== '无名滑雪者') el.name.value = saved;
     },
     startRun() {
       el.boot.hidden = true; el.over.hidden = true; el.board.hidden = true;
       el.hud.hidden = false;
     },
-    hud(speedKmh, dist, best) {
+    hud(speedKmh, dist, best, stage, next) {
+      el.stage.textContent = stage;
+      el.next.textContent = next;
       el.speed.textContent = Math.round(speedKmh);
       el.dist.textContent = Math.floor(dist);
       el.best.textContent = best > 0 ? Math.floor(best) + 'm' : '—';
     },
-    showOver(score, isBest) {
+    showOver(score, isBest, splits) {
+      el.splits.replaceChildren();
+      for (const split of splits.slice(-3)) {
+        const row = document.createElement('div');
+        const name = document.createElement('span');
+        const time = document.createElement('b');
+        name.textContent = split.label;
+        time.textContent = split.time.toFixed(2) + ' 秒';
+        if (split.delta !== null) {
+          time.textContent += '（' + (split.delta > 0 ? '+' : '') + split.delta.toFixed(2) + '）';
+        }
+        row.append(name, time);
+        el.splits.append(row);
+      }
       el.hud.hidden = true;
       el.oScore.textContent = Math.floor(score);
       el.oSub.textContent = isBest ? '新纪录！' : '再试一次，走刃更顺一点';

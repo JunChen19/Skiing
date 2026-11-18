@@ -68,24 +68,16 @@ function difficultyAt(z) {
   return U.smoothstep(0, 1, U.clamp(-z / CFG.DIFF_DIST, 0, 1));
 }
 
-// 坡度（度），随难度增加 + 低频起伏 ±22%
-function slopeDegAt(z, seed) {
-  const d = difficultyAt(z);
-  const deg = U.lerp(CFG.SLOPE_MIN_DEG, CFG.SLOPE_MAX_DEG, d);
-  const wig = (vnoise2(z * 0.0031, 0.37, seed + 55) - 0.5) * 0.45;
-  return deg * (1 + wig);
-}
-
-// ---- 唯一权威地形高度函数（网格 / 物理 / 树木摆放全用它）----
+// Integrate the smooth change in grade. Its derivative stays bounded at any distance.
+const START_GRADE = Math.tan(U.deg(CFG.SLOPE_MIN_DEG));
+const GRADE_CHANGE = Math.tan(U.deg(CFG.SLOPE_MAX_DEG)) - START_GRADE;
 function terrainHeight(x, z, seed) {
-  const grade = Math.tan(U.deg(slopeDegAt(z, seed)));
-  let h = z * grade;
-
-  // 大起伏（滚落线雪包）：幅度/频率调校为保证整体持续下坡，
-  // 噪声最大斜率(~amp*freq*3)须小于基础坡度，避免出现平坡/上坡刹车段
-  h -= fbm(x * 0.012, z * 0.012, 4, seed) * 5.2;
-  // 中细节
-  h += fbm(x * 0.05 + 31.7, z * 0.05, 3, seed + 7) * 1.5;
+  const distance = Math.max(0, -z);
+  const t = Math.min(1, distance / CFG.DIFF_DIST);
+  const integral = CFG.DIFF_DIST * t * t * t * (1 - t * 0.5) + Math.max(0, distance - CFG.DIFF_DIST);
+  let h = z * START_GRADE - GRADE_CHANGE * integral;
+  h += fbm(x * 0.012, z * 0.012, 3, seed) * 2.8;
+  h += fbm(x * 0.045 + 31.7, z * 0.034, 2, seed + 7) * 0.48;
   // 走廊边缘的风唇
   const a = Math.abs(x);
   if (a > 34) {
@@ -95,7 +87,9 @@ function terrainHeight(x, z, seed) {
   if (a > CFG.BANK_START) {
     const t = a - CFG.BANK_START;
     const rock = 0.5 + 0.5 * fbm(x * 0.045, z * 0.045, 3, seed + 13);
-    h += t * t * 0.036 + t * rock * 0.5;
+    const shoulder = x > 0 ? 0.48 : 0.12;
+    const fold = 0.75 + 0.25 * Math.cos(z * 0.017 + (seed % 19));
+    h += t * shoulder * fold * (0.55 + rock) + U.smoothstep(0, 28, t) * rock * 3.5;
   }
   return h;
 }
@@ -108,4 +102,33 @@ function terrainNormalAt(x, z, seed, out) {
   const dz = (terrainHeight(x, z + e, seed) - terrainHeight(x, z - e, seed)) / (2 * e);
   out = out || new THREE.Vector3();
   return out.set(-dx, 1, -dz).normalize();
+}
+
+// Each 300 m sector joins the next at x=0 with level tangents.
+// The last bend has a narrow, straight inside line and a wider outside arc.
+const COURSE_LENGTH = 300;
+// Stretch later sectors to keep their turn radius reachable at terminal speed.
+const LONG_SECTOR = 480;
+function sectorAt(distance) {
+  return distance < COURSE_LENGTH ? 0 : 1 + Math.floor((distance - COURSE_LENGTH) / LONG_SECTOR);
+}
+function sectorDistance(sector, local) {
+  return sector === 0 ? local : COURSE_LENGTH + (sector - 1) * LONG_SECTOR + local * LONG_SECTOR / COURSE_LENGTH;
+}
+const COURSE_KNOTS = [0, 30, 74, 131, 184, 222, 261, 300];
+const COURSE_OFFSETS = [0, 0, 12, -12, 11, 0, 15, 0];
+function courseAt(distance, seed, out) {
+  const d = Math.max(0, distance);
+  const sector = sectorAt(d);
+  const local = (d - sectorDistance(sector, 0)) * (sector ? COURSE_LENGTH / LONG_SECTOR : 1);
+  const variation = hash2i(sector, 51, seed);
+  const scale = (variation < 0.5 ? -1 : 1) * (0.82 + 0.18 * Math.abs(2 * variation - 1));
+  let i = 0;
+  while (local >= COURSE_KNOTS[i + 1]) i++;
+  const phase = (local - COURSE_KNOTS[i]) / (COURSE_KNOTS[i + 1] - COURSE_KNOTS[i]);
+  const t = (1 - Math.cos(phase * Math.PI)) * 0.5;
+  out.x = scale * U.lerp(COURSE_OFFSETS[i], COURSE_OFFSETS[i + 1], t);
+  out.width = U.lerp(6.8, 4.2, difficultyAt(-d));
+  out.shortcut = local >= 222;
+  return out;
 }

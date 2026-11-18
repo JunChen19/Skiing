@@ -1,6 +1,6 @@
 /* ================= postfx.js ================= */
 // 自研后处理链（不依赖 three addons）：
-// 场景(HDR) → 提亮(1/4) → 双向高斯模糊 → 合成(泛光+ACES色调映射+FXAA+暗角+颗粒)
+// 场景(HDR) → 提亮(1/4) → 双向高斯模糊 → 合成(泛光+ACES色调映射+边缘平滑+暗角+颗粒)
 'use strict';
 
 function makePostFX(renderer, scene, camera) {
@@ -11,16 +11,11 @@ function makePostFX(renderer, scene, camera) {
   quad.frustumCulled = false;
   QUAD.add(quad);
 
-  let enabled = true;
   let W = 2, H = 2;
 
-  const halfFloat = (function () {
-    try {
-      const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
-      rt.dispose();
-      return true;
-    } catch (e) { return false; }
-  })();
+  const gl = renderer.getContext();
+  const halfFloat = renderer.capabilities.isWebGL2 && !!gl.getExtension('EXT_color_buffer_float');
+  let quality = 2;
 
   const mkRT = (w, h, opt) => new THREE.WebGLRenderTarget(
     Math.max(2, Math.floor(w)), Math.max(2, Math.floor(h)),
@@ -33,8 +28,10 @@ function makePostFX(renderer, scene, camera) {
 
   let rtScene, rtA, rtB;
   function alloc() {
-    if (rtScene) { rtScene.dispose(); rtA.dispose(); rtB.dispose(); }
+    if (rtScene) rtScene.dispose();
+    if (rtA) { rtA.dispose(); rtB.dispose(); rtA = rtB = null; }
     rtScene = mkRT(W, H, halfFloat ? { type: THREE.HalfFloatType } : {});
+    if (quality < 2) return;
     rtA = mkRT(W / 4, H / 4, halfFloat ? { type: THREE.HalfFloatType, depthBuffer: false } : { depthBuffer: false });
     rtB = mkRT(W / 4, H / 4, halfFloat ? { type: THREE.HalfFloatType, depthBuffer: false } : { depthBuffer: false });
   }
@@ -80,18 +77,18 @@ function makePostFX(renderer, scene, camera) {
     `,
   });
 
-  // ---- 合成：泛光 + ACES + FXAA + 暗角 + 颗粒 ----
+  // ---- 合成：泛光 + ACES + 边缘平滑 + 暗角 + 颗粒 ----
   const compMat = new THREE.ShaderMaterial({
     uniforms: {
       tD: { value: null }, tB: { value: null },
       uBloom: { value: 0.55 }, uExposure: { value: 1.0 },
       uRcp: { value: new THREE.Vector2() }, uTime: { value: 0 },
-      uGrain: { value: 0.014 },
+      uGrain: { value: 0.003 }, uAA: { value: 1 },
     },
     vertexShader: VERT,
     fragmentShader: `
       uniform sampler2D tD, tB;
-      uniform float uBloom, uExposure, uTime, uGrain;
+      uniform float uBloom, uExposure, uTime, uGrain, uAA;
       uniform vec2 uRcp;
       varying vec2 vUv;
 
@@ -116,33 +113,18 @@ function makePostFX(renderer, scene, camera) {
       }
       float lumaOf(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
-      // FXAA（console 版）
-      vec3 fxaa(sampler2D tex, vec2 uv) {
-        vec3 m  = toOut(texture2D(tex, uv).rgb + texture2D(tB, uv).rgb * uBloom);
-        vec3 nw = toOut(texture2D(tex, uv + vec2(-1.0, -1.0) * uRcp).rgb);
-        vec3 ne = toOut(texture2D(tex, uv + vec2( 1.0, -1.0) * uRcp).rgb);
-        vec3 sw = toOut(texture2D(tex, uv + vec2(-1.0,  1.0) * uRcp).rgb);
-        vec3 se = toOut(texture2D(tex, uv + vec2( 1.0,  1.0) * uRcp).rgb);
-        float lm = lumaOf(m), lnw = lumaOf(nw), lne = lumaOf(ne), lsw = lumaOf(sw), lse = lumaOf(se);
-        float lMin = min(lm, min(min(lnw, lne), min(lsw, lse)));
-        float lMax = max(lm, max(max(lnw, lne), max(lsw, lse)));
-        if (lMax - lMin < 0.06 * lMax + 0.02) return m;
-        vec2 dir = vec2(-((lnw + lne) - (lsw + lse)), ((lnw + lsw) - (lne + lse)));
-        float rcpReduce = 1.0 / (8.0 * (abs(dir.x) + abs(dir.y)) + 0.0001);
-        dir = normalize(dir + vec2(0.0001)) * min(abs(dir.x), abs(dir.y)) * rcpReduce * uRcp * 8.0;
-        vec3 a = toOut(texture2D(tex, uv + dir * (1.0 / 3.0 - 0.5)).rgb);
-        vec3 b = toOut(texture2D(tex, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
-        vec3 c = a + b;
-        vec3 d = toOut(texture2D(tex, uv + dir * -0.5).rgb);
-        vec3 e = toOut(texture2D(tex, uv + dir *  0.5).rgb);
-        c = (c + d + e) * 0.25;
-        float lc = lumaOf(c);
-        if (lc < lMin || lc > lMax) return m;
-        return c;
-      }
-
       void main() {
-        vec3 col = fxaa(tD, vUv);
+        vec3 hdr = texture2D(tD, vUv).rgb;
+        if (uAA > 0.5) {
+          vec3 l = texture2D(tD, vUv - vec2(uRcp.x, 0.)).rgb;
+          vec3 r = texture2D(tD, vUv + vec2(uRcp.x, 0.)).rgb;
+          vec3 u = texture2D(tD, vUv + vec2(0., uRcp.y)).rgb;
+          vec3 d = texture2D(tD, vUv - vec2(0., uRcp.y)).rgb;
+          float edge = abs(lumaOf(l-r)) + abs(lumaOf(u-d));
+          hdr = mix(hdr, (l+r+u+d)*0.25, 0.35*smoothstep(0.12, 0.55, edge));
+        }
+        if (uBloom > 0.0) hdr += texture2D(tB, vUv).rgb * uBloom;
+        vec3 col = toOut(hdr);
         // 质感调色：柔和对比 + 饱和 + 冷暖分区（阴影偏蓝、高光偏暖）
         col = mix(col, col * col * (3.0 - 2.0 * col), 0.20);
         float lu = lumaOf(col);
@@ -161,7 +143,10 @@ function makePostFX(renderer, scene, camera) {
     `,
   });
 
-  function setSize(w, h) { W = w; H = h; alloc(); }
+  function setSize(w, h) {
+    if (rtScene && W === w && H === h && !!rtA === (quality === 2)) return;
+    W = w; H = h; alloc();
+  }
 
   function pass(mat, target) {
     quad.material = mat;
@@ -170,34 +155,31 @@ function makePostFX(renderer, scene, camera) {
   }
 
   function render(time) {
-    if (!enabled || !rtScene) {
-      renderer.setRenderTarget(null);
-      renderer.render(scene, camera);
-      return;
-    }
     compMat.uniforms.uTime.value = time;
     compMat.uniforms.uRcp.value.set(1 / W, 1 / H);
 
     renderer.setRenderTarget(rtScene);
     renderer.render(scene, camera);
 
-    brightMat.uniforms.tD.value = rtScene.texture;
-    pass(brightMat, rtA);
+    if (rtA) {
+      brightMat.uniforms.tD.value = rtScene.texture;
+      pass(brightMat, rtA);
 
-    blurMat.uniforms.tD.value = rtA.texture;
-    blurMat.uniforms.uDir.value.set(1.35 / rtA.width, 0);
-    pass(blurMat, rtB);
-    blurMat.uniforms.tD.value = rtB.texture;
-    blurMat.uniforms.uDir.value.set(0, 1.35 / rtA.height);
-    pass(blurMat, rtA);
+      blurMat.uniforms.tD.value = rtA.texture;
+      blurMat.uniforms.uDir.value.set(1.35 / rtA.width, 0);
+      pass(blurMat, rtB);
+      blurMat.uniforms.tD.value = rtB.texture;
+      blurMat.uniforms.uDir.value.set(0, 1.35 / rtA.height);
+      pass(blurMat, rtA);
 
+    }
     compMat.uniforms.tD.value = rtScene.texture;
-    compMat.uniforms.tB.value = rtA.texture;
+    compMat.uniforms.tB.value = rtA ? rtA.texture : null;
+    compMat.uniforms.uBloom.value = rtA ? 0.12 : 0;
+    compMat.uniforms.uAA.value = quality > 0 ? 1 : 0;
     pass(compMat, null);
   }
 
-  function setEnabled(on) { enabled = on; }
-
-  alloc();
-  return { render, setSize, setEnabled, get enabled() { return enabled; } };
+  function setQuality(q) { quality = q; }
+  return { render, setSize, setQuality, get enabled() { return true; } };
 }

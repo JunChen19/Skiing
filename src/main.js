@@ -11,7 +11,6 @@
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-    if (!renderer.capabilities.isWebGL2 && !renderer.capabilities.isWebGL1) throw new Error('no webgl');
   } catch (e) {
     document.getElementById('loading').textContent = '此设备/浏览器不支持 WebGL，无法运行游戏';
     return;
@@ -22,7 +21,7 @@
 
   // ---- 场景 ----
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(new THREE.Color('#dcc6a6').convertSRGBToLinear(), 40, 420);
+  scene.fog = new THREE.Fog(new THREE.Color('#c5d7e3').convertSRGBToLinear(), 75, 420);
   const camera = new THREE.PerspectiveCamera(CFG.CAM_FOV_BASE, 1, 0.1, 3200);
 
   // ---- 光照：侧后方暖阳（顺光照亮雪面）+ 天空环境光 ----
@@ -37,7 +36,7 @@
   sun.shadow.camera.near = 10; sun.shadow.camera.far = 320;
   sun.shadow.camera.updateProjectionMatrix();
   sun.shadow.bias = -0.00055;
-  sun.shadow.normalBias = 1.2;
+  sun.shadow.normalBias = 0.055;
   scene.add(sun, sun.target);
   const hemi = new THREE.HemisphereLight(
     new THREE.Color('#cfe0f5').convertSRGBToLinear(),
@@ -51,6 +50,7 @@
   const terrain = makeTerrain(scene, seed);
   const treesMod = makeTrees(scene, seed);
   const particles = makeParticles(scene);
+  const tracks = makeTracks(scene);
   const skier = buildSkier(scene, seed);
   const postfx = makePostFX(renderer, scene, camera);
   const phys = makePhysics(seed);
@@ -60,7 +60,8 @@
 
   const ui = makeUI({
     onStart(name) { sfx.init(); sfx.click(); startRun(); },
-    onRetry() { sfx.click(); startRun(); },
+    onRetry() { sfx.click(); startRun(false); },
+    onNew() { sfx.click(); startRun(); },
     onResume() { sfx.click(); togglePause(false); },
     onQuit() { sfx.click(); toMenu(); },
     onMute() { sfx.setMuted(!sfx.muted); ui.setMuteIcon(sfx.muted); },
@@ -75,9 +76,12 @@
   let quality = 2;   // 2 高 / 1 中 / 0 低
   function applyQuality(q) {
     quality = q;
-    if (q === 2) { renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75)); sun.castShadow = true; postfx.setEnabled(true); }
-    else if (q === 1) { renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25)); sun.castShadow = true; postfx.setEnabled(true); }
-    else { renderer.setPixelRatio(1); sun.castShadow = false; postfx.setEnabled(false); }
+    const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.4 : 1.6);
+    renderer.setPixelRatio(dpr * [0.75, 0.90, 1][q]);
+    sun.castShadow = q > 0;
+    const size = q === 2 ? SHADOW_RES : SHADOW_RES / 2;
+    sun.shadow.mapSize.set(size, size);
+    postfx.setQuality(q);
     if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     onResize();
   }
@@ -87,36 +91,66 @@
   let state = 'MENU';          // MENU / RUN / CRASH / OVER / PAUSE
   let pausedFrom = 'RUN';
   let timeScale = 1;
-  let menuT = 0;
-  let fpsEma = 60, qTimer = 0, upStreak = 0, lastUpAt = -1e9;
+  const menuLane = {};
+  let frameSeconds = 1 / 60, qTimer = 0, upStreak = 0, lastUpAt = -1e9;
   let lastPk = -1;
-  let runBest = board.localBest();
+  let runBest = board.localBest(), hudAt = 0;
   let trauma = 0;              // 镜头抖动能量
+
+  const stages = [
+    { name: '开阔坡', end: 42 }, { name: '连续弯', end: 222 }, { name: '林间分线', end: COURSE_LENGTH },
+  ];
+  const splits = [], routeBests = [];
+  let stageIndex = 0, sector = 0, elapsed = 0, stageStart = 0, runId = 0;
+  function stageEnd() { return sectorDistance(sector, stages[stageIndex].end); }
+  function timeStep(dt, oldDistance) {
+    elapsed += dt;
+    const end = stageEnd(), distance = phys.st.dist;
+    if (distance < end) return;
+    const crossing = elapsed - dt * (distance - end) / Math.max(0.001, distance - oldDistance);
+    const time = crossing - stageStart;
+    const index = sector * stages.length + stageIndex;
+    const best = routeBests[index];
+    splits.push({ label: end + ' m · ' + stages[stageIndex].name, time, delta: best == null ? null : time - best });
+    routeBests[index] = best == null ? time : Math.min(best, time);
+    stageStart = crossing;
+    if (++stageIndex === stages.length) { stageIndex = 0; sector++; }
+  }
 
   function refreshWorld() {
     terrain.ensure(phys.st.z);
     const [kLo, kHi] = terrain.rangeFor(phys.st.z);
     treesMod.syncChunks(kLo, kHi);
-    treesMod.rebuildInstances();
+    treesMod.rebuildInstances(phys.st.z);
     lastPk = Math.max(0, Math.floor(-phys.st.z / CFG.CHUNK_LEN));
   }
 
   function hardReset(freshSeed) {
     if (freshSeed) seed = (Math.random() * 2147483647) | 0;
     phys.reset(seed);
-    skier.reset();
+    skier.reset(seed);
+    tracks.reset();
+    sprayTime = 0;
+    input.reset();
+    accum = 0;
+    Object.assign(prevState, phys.st);
     terrain.reset(seed);
     treesMod.reset(seed);
     lastPk = -1;
     refreshWorld();
-    // 近处地形同步构建（约 3 块），远处交给每帧的异步队列
-    for (let i = 0; i < 3 && terrain.pending; i++) terrain.update(60);
+    terrain.finishNearest();
     particles.resetDrift(phys.st.x, phys.st.y + 10, phys.st.z - 20);
     snapCamera();
   }
 
-  function startRun() {
-    hardReset(true);
+  function startRun(freshSeed = true) {
+    hardReset(freshSeed);
+    if (freshSeed) routeBests.length = 0;
+    runId++;
+    splits.length = 0;
+    hudAt = 0;
+    stageIndex = sector = elapsed = stageStart = 0;
+    clock.getDelta();
     timeScale = 1; trauma = 0;
     state = 'RUN';
     treesMod.setVisible(true);
@@ -126,14 +160,14 @@
 
   function toMenu() {
     hardReset(true);
-    timeScale = 1; state = 'MENU'; menuT = 0;
-    treesMod.setVisible(false);   // 菜单背景走纯净雪坡，无穿模
+    timeScale = 1; state = 'MENU';
+    treesMod.setVisible(true);
     ui.showBoot();
   }
 
   function togglePause(on) {
     if (on && state === 'RUN') { pausedFrom = state; state = 'PAUSE'; ui.showPause(true); }
-    else if (!on && state === 'PAUSE') { state = pausedFrom; ui.showPause(false); }
+    else if (!on && state === 'PAUSE') { clock.getDelta(); input.reset(); state = pausedFrom; ui.showPause(false); }
   }
 
   // ---- 撞树流程 ----
@@ -154,19 +188,21 @@
     timeScale = 1;
     const score = Math.floor(phys.st.dist);
     const isBest = board.setLocalBest(score);
-    ui.showOver(score, isBest);
+    const partial = { label: '本段 · ' + stages[stageIndex].name + '（未完成）', time: elapsed - stageStart, delta: null };
+    ui.showOver(score, isBest, [...splits, partial]);
     if (isBest) sfx.newBest(); else sfx.over();
     const name = localStorage.getItem(CFG.NAME_KEY) || '无名滑雪者';
+    const submittingRun = runId;
     const res = await board.submit(name, score);
+    if (submittingRun !== runId || state !== 'OVER') return;
     if (res.ok && res.cloud && res.rank) ui.setRank(`全球第 ${res.rank} 名`);
     else if (res.ok && !res.cloud) ui.setRank('已记入本机排行榜');
     else if (!res.ok && res.cloud) ui.setRank('云端暂不可达，成绩已存本机');
   }
 
   // ---- 碰撞 & 擦树 ----
-  function checkTrees() {
+  function checkTrees(list) {
     const st = phys.st;
-    const list = treesMod.nearTrees(st.z);
     for (const t of list) {
       const dz = t.z - st.z;
       if (dz < -3 || dz > 6) {
@@ -191,13 +227,15 @@
   let camFov = CFG.CAM_FOV_BASE;
   function snapCamera() {
     const st = phys.st;
+    camFov = CFG.CAM_FOV_BASE;
+    camera.fov = camFov;
+    camera.updateProjectionMatrix();
     camPos.set(st.x, st.y + CFG.CAM_UP, st.z + CFG.CAM_BACK);
     camLook.set(st.x, st.y + 1, st.z - 10);
     camera.position.copy(camPos);
     camera.lookAt(camLook);
   }
-  function updateCamera(dt) {
-    const st = phys.st;
+  function updateCamera(dt, st) {
     let fx = st.vx, fz = st.vz;
     const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
     const px = st.x, py = st.y, pz = st.z;
@@ -212,7 +250,7 @@
     camPos.y = U.damp(camPos.y, dy, 5, dt);
     camPos.z = U.damp(camPos.z, dz, 8, dt);
     camLook.x = U.damp(camLook.x, px + fx * CFG.CAM_AHEAD, 11, dt);
-    camLook.y = U.damp(camLook.y, py + 1.15, 9, dt);
+    camLook.y = U.damp(camLook.y, terrainHeight(px + fx * CFG.CAM_AHEAD, pz + fz * CFG.CAM_AHEAD, seed) + 1.4, 8, dt);
     camLook.z = U.damp(camLook.z, pz + fz * CFG.CAM_AHEAD, 11, dt);
 
     // 抖动（trauma²）
@@ -234,7 +272,7 @@
   // ---- 太阳阴影跟随（贴图元对齐防闪烁）----
   function updateSun() {
     const st = phys.st;
-    const texel = (SE * 2) / SHADOW_RES;
+    const texel = (SE * 2) / sun.shadow.mapSize.x;
     const tx = Math.round(st.x / texel) * texel;
     const tz = Math.round(st.z / texel) * texel;
     const ty = terrainHeight(tx, tz, seed);
@@ -247,66 +285,63 @@
   }
 
   // ---- 雪雾发射 ----
-  function emitSprayAtSkis() {
-    const st = phys.st;
-    const turn = Math.abs(st.steer) * (0.3 + st.speedN);
-    const power = U.clamp(st.slip * 1.0 + turn * 0.85 + st.speedN * 0.15, 0, 1.5);
-    if (power < 0.06) return;
-    const bx = Math.sin(st.heading), bz = Math.cos(st.heading);   // 后方
-    const rx = -Math.cos(st.heading), rz = Math.sin(st.heading);  // 右侧
-    const side = -Math.sign(st.latA || 1);                        // 雪往弯外喷
-    particles.emitSpray(
-      st.x - bx * 0.85, st.y, st.z - bz * 0.85,
-      bx, bz, rx * side, rz * side,
-      power * 0.75 + 0.2, st.speed
-    );
-    particles.emitSpray(
-      st.x - bx * 0.7 + rx * 0.28, st.y, st.z - bz * 0.7 + rz * 0.28,
-      bx, bz, rx * side, rz * side,
-      power * 0.5, st.speed
-    );
+  let sprayTime = 0;
+  function emitSprayAtSkis(st, dt) {
+    const turn = Math.abs(st.steer) * (0.35 + st.speedN);
+    const power = U.clamp(st.slip + turn * 0.85, 0, 1.5);
+    sprayTime += dt;
+    if (sprayTime < 1 / 45) return;
+    const bursts = Math.min(3, Math.floor(sprayTime * 45));
+    sprayTime %= 1 / 45;
+    if (power < 0.05) return;
+    const sn = Math.sin(st.heading), cs = Math.cos(st.heading);
+    const side = Math.sign(st.lean);
+    for (const tail of skier.tails) {
+      for (let i = 0; i < bursts; i++) {
+        particles.emitSpray(tail.x, tail.y, tail.z, sn, cs, side * cs, -side * sn, power * 0.7, st.speed);
+      }
+    }
   }
 
   // ---- 主循环 ----
   const clock = new THREE.Clock();
   let accum = 0;
   const H = 1 / 120;
-  const animState = {
-    x: 0, y: 0, z: 0, heading: 0, lean: 0, steer: 0, steerRate: 0,
-    speed: 0, speedN: 0, tuck: 0, compression: 0, crashed: false,
-  };
+  const animState = {}, prevState = {};
+  const interpolated = ['x', 'y', 'z', 'vx', 'vz', 'heading', 'lean', 'steer', 'compression', 'tuck'];
 
   function frame() {
     requestAnimationFrame(frame);
-    let dt = Math.min(clock.getDelta(), 1 / 30);
-    const rawDt = dt;
-    fpsEma = fpsEma * 0.95 + (1 / Math.max(rawDt, 1e-4)) * 0.05;
-
-    if (state === 'PAUSE') { postfx.render(0); return; }
-
-    dt *= timeScale;
+    const rawDt = clock.getDelta();
+    if (state === 'PAUSE' || state === 'OVER') return;
+    const dt = Math.min(rawDt, 0.12) * timeScale;
+    if (rawDt > 0) frameSeconds = U.damp(frameSeconds, Math.min(rawDt, 1), 2, rawDt);
     terrainTimeUniform.value += dt;
-
-    // 物理子步
-    if (state === 'RUN' || state === 'MENU' || state === 'CRASH') {
-      if (state === 'RUN') {
-        input.update();
-        accum += dt;
-        let guard = 0;
-        while (accum >= H && guard++ < 12) {
-          phys.step(H, input.steer);
-          accum -= H;
+    if (state === 'RUN' || state === 'MENU') {
+      input.update();
+      accum += dt;
+      const candidates = state === 'RUN' ? treesMod.nearTrees(phys.st.z) : null;
+      while (accum + 1e-10 >= H && !phys.st.crashed) {
+        Object.assign(prevState, phys.st);
+        let steer = input.steer;
+        if (state === 'MENU') {
+          const ahead = U.clamp(phys.st.speed * 0.46, 5, 15);
+          courseAt(phys.st.dist + ahead, seed, menuLane);
+          const heading = -Math.atan2(menuLane.x - phys.st.x, ahead);
+          steer = U.clamp((phys.st.heading - heading) * 4.2, -1, 1);
         }
-        checkTrees();
-      } else if (state === 'MENU') {
-        menuT += dt;
-        phys.step(dt, Math.sin(menuT * 0.5) * 0.42);
-        if (phys.st.dist > 900) hardReset(true);
-      } else if (state === 'CRASH') {
-        phys.step(dt, 0);
-        crashTimer += rawDt;
-        if (crashTimer > CFG.CRASH_TIME) finishRun();
+        phys.step(H, steer);
+        accum = Math.max(0, accum - H);
+        if (state === 'RUN') {
+          timeStep(H, prevState.dist);
+          checkTrees(candidates);
+        }
       }
+      if (state === 'MENU' && phys.st.dist > 320) hardReset(true);
+    } else if (state === 'CRASH') {
+      phys.step(dt, 0);
+      crashTimer += rawDt;
+      if (crashTimer >= CFG.CRASH_TIME) finishRun();
     }
 
     // 世界跟随
@@ -314,33 +349,38 @@
 
     // 人物（复用状态对象，避免每帧分配）
     const st = phys.st;
-    animState.x = st.x; animState.y = st.y; animState.z = st.z;
-    animState.heading = st.heading; animState.lean = st.lean; animState.steer = st.steer;
-    animState.steerRate = st.steerRate; animState.speed = st.speed; animState.speedN = st.speedN;
-    animState.tuck = st.tuck; animState.compression = st.compression; animState.crashed = st.crashed;
+    Object.assign(animState, st);
+    if (!st.crashed) {
+      const alpha = U.sat(accum / H);
+      for (const key of interpolated) animState[key] = U.lerp(prevState[key], st[key], alpha);
+    }
     skier.update(animState, dt, terrainTimeUniform.value);
-
-    // 粒子 / 天空 / 光照 / 摄像机
-    if (!st.crashed) emitSprayAtSkis();
+    terrain.contact.value.set(animState.x, animState.z, Math.sin(animState.heading), Math.cos(animState.heading));
+    if (!st.crashed) {
+      tracks.append(skier.tails, animState.heading, terrainTimeUniform.value);
+      emitSprayAtSkis(animState, dt);
+    }
     particles.updateSpray(dt);
     particles.updateDrift(dt, camera.position);
     sfx.update(dt, st);
     sky.update(camera, dt, st.z);
-    updateSun();
-    updateCamera(dt);
+    if (quality > 0) updateSun();
+    updateCamera(dt, animState);
 
-    // HUD
-    if (state === 'RUN') {
-      ui.hud(st.speed * 3.6, st.dist, Math.max(runBest, st.dist));
+    // Keep DOM updates independent of the render frequency.
+    if (state === 'RUN' && elapsed >= hudAt) {
+      hudAt = elapsed + 0.08;
+      ui.hud(st.speed * 3.6, st.dist, runBest, stages[stageIndex].name,
+        '距分段点 ' + Math.max(0, Math.ceil(stageEnd() - st.dist)) + ' m');
     }
 
     // 自动降质（卡顿立即降）+ 缓慢升质（持续流畅才回升，带冷却防振荡）
     qTimer += rawDt;
     if (qTimer > 2) {
       qTimer = 0;
-      if (fpsEma < 45 && quality > 0) { applyQuality(quality - 1); upStreak = 0; }
+      if (frameSeconds > 1 / 45 && quality > 0) { applyQuality(quality - 1); upStreak = 0; }
     }
-    if (quality < 2 && fpsEma > 57) {
+    if (quality < 2 && frameSeconds < 1 / 57) {
       upStreak += rawDt;
       const now = performance.now() / 1000;
       if (upStreak > 8 && now - lastUpAt > 30) {
@@ -362,7 +402,7 @@
       terrain.ensure(st.z);
       const [kLo, kHi] = terrain.rangeFor(st.z);
       treesMod.syncChunks(kLo, kHi);
-      treesMod.rebuildInstances();
+      treesMod.rebuildInstances(phys.st.z);
     }
     terrain.update(3.5);   // 地形构建按预算分帧推进，不卡主循环
   }
@@ -375,6 +415,7 @@
     renderer.setSize(w, h);
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     postfx.setSize(size.x, size.y);
+    if (window.__SKI && (state === 'PAUSE' || state === 'OVER')) postfx.render(terrainTimeUniform.value);
   }
   window.addEventListener('resize', onResize);
   onResize();
@@ -394,14 +435,13 @@
   // ---- 启动 ----
   hardReset(true);
   ui.showBoot();
-  if (!board.isCloud) {
-    setTimeout(() => ui.toast('排行榜当前为本机模式，全球共享配置见 README', 3200), 800);
-  }
+
   // 调试钩子（开发/测试用）
   window.__SKI = {
     get state() { return state; },
     get seed() { return seed; },
-    phys, postfx, renderer, scene, camera, particles,
+    phys, postfx, renderer, scene, camera, particles, skier,
+    get quality() { return quality; },
     setQuality: applyQuality,
   };
   frame();

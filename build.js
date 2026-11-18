@@ -60,25 +60,26 @@ ${css}
     </div>
     <div class="hud-right">
       <div class="hud-item"><span class="hud-label">最佳</span><span class="hud-val"><b id="hud-best">—</b></span></div>
-    </div>
     <div class="hud-buttons">
       <button id="btn-mute" class="icon-btn" title="静音">♪</button>
       <button id="btn-pause" class="icon-btn" title="暂停">II</button>
     </div>
+    </div>
+    <div class="hud-stage"><strong id="hud-stage"></strong><span id="hud-next"></span></div>
   </div>
 
   <!-- 开始界面 -->
   <div id="boot" class="screen">
     <div class="panel boot-panel">
       <div class="logo"><span class="logo-zh">雪线</span><span class="logo-en">SNOWLINE</span></div>
-      <div class="tagline">无尽雪坡 · 物理走刃 · 全球排行</div>
+      <div class="tagline">蓝旗指引宽线，橙旗标记林间捷径。</div>
       <div class="field">
         <label for="inp-name">你的名字</label>
-        <input id="inp-name" type="text" maxlength="16" placeholder="输入用户名，记录到排行榜" autocomplete="off">
+        <input id="inp-name" type="text" maxlength="16" placeholder="为成绩署名（选填）" autocomplete="off">
       </div>
       <button id="btn-start" class="btn primary big">开始滑行</button>
       <button id="btn-board-boot" class="btn ghost">排行榜</button>
-      <div class="hint">桌面：移动鼠标左右走刃 · 手机：按住屏幕左右滑动</div>
+      <div class="hint">鼠标或 ← → 转向 · 触屏按住左右滑动</div>
     </div>
   </div>
 
@@ -88,8 +89,10 @@ ${css}
       <div class="over-title">撞树了！</div>
       <div class="over-score"><b id="over-score">0</b><i>m</i></div>
       <div class="over-sub" id="over-sub"></div>
+      <div id="splits"></div>
       <div id="over-rank" class="over-rank"></div>
-      <button id="btn-retry" class="btn primary big">再滑一次</button>
+      <button id="btn-retry" class="btn primary big">重试这条路线</button>
+      <button id="btn-new" class="btn ghost">换一条路线</button>
       <button id="btn-board-over" class="btn ghost">排行榜</button>
     </div>
   </div>

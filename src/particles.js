@@ -105,6 +105,8 @@ function makeParticles(scene) {
   const dMeta = [];
   const BOX = { x: 70, y: 44, z: 80 };
   function resetDrift(cx, cy, cz) {
+    sLife.fill(0);
+    sHead = 0;
     for (let i = 0; i < CFG.DRIFT_MAX; i++) {
       drift.pos[i * 3] = cx + (Math.random() - 0.5) * BOX.x * 2;
       drift.pos[i * 3 + 1] = cy + (Math.random() - 0.5) * BOX.y;
@@ -143,4 +145,59 @@ function makeParticles(scene) {
     sprayPoints: spray.pts,
     driftPoints: drift.pts,
   };
+}
+
+// Fixed-size strips following the two grounded tails. Each contact fades in place.
+function makeTracks(scene) {
+  const capacity = 420;
+  const positions = new Float32Array(capacity * 12 * 3);
+  const born = new Float32Array(capacity * 12);
+  const geo = new THREE.BufferGeometry();
+  const position = new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage);
+  const stamps = new THREE.BufferAttribute(born, 1).setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('position', position);
+  geo.setAttribute('born', stamps);
+  const material = new THREE.ShaderMaterial({
+    uniforms: { time: terrainTimeUniform },
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    vertexShader: 'attribute float born; uniform float time; varying float fade; void main(){fade=1.-smoothstep(1.,5.,time-born); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+    fragmentShader: 'varying float fade; void main(){gl_FragColor=vec4(.29,.46,.59,fade*.36);}',
+  });
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  let cursor = 0, count = 0, started = false;
+  const prev = [new THREE.Vector3(), new THREE.Vector3()];
+  function reset() {
+    count = cursor = 0; started = false;
+    geo.setDrawRange(0, 0);
+  }
+  function put(index, point, dx, dz, stamp) {
+    position.setXYZ(index, point.x + dx, point.y + 0.015, point.z + dz);
+    born[index] = stamp;
+  }
+  function append(tails, heading, now) {
+    if (started && prev[0].distanceToSquared(tails[0]) < 0.09) return;
+    if (started) {
+      const dx = Math.cos(heading) * 0.038, dz = -Math.sin(heading) * 0.038;
+      let v = cursor * 12;
+      for (let i = 0; i < 2; i++) {
+        const a = prev[i], b = tails[i];
+        put(v++, a, -dx, -dz, now);
+        put(v++, a, dx, dz, now);
+        put(v++, b, -dx, -dz, now);
+        put(v++, b, -dx, -dz, now);
+        put(v++, a, dx, dz, now);
+        put(v++, b, dx, dz, now);
+      }
+      position.needsUpdate = stamps.needsUpdate = true;
+      cursor = (cursor + 1) % capacity;
+      count = Math.min(capacity, count + 1);
+      geo.setDrawRange(0, count * 12);
+    }
+    prev[0].copy(tails[0]); prev[1].copy(tails[1]); started = true;
+  }
+  reset();
+  return { append, reset };
 }
