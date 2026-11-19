@@ -22,6 +22,7 @@ function makePhysics(seed) {
     dist: 0,
     crashed: false,
     crashT: 0,
+    jumpPhase: 0, jumpHeight: 0,
   };
 
   const nrm = new THREE.Vector3();
@@ -39,11 +40,17 @@ function makePhysics(seed) {
     st.compression = 0; st.tuck = 0; st.speedN = 0;
     st.dist = 0;
     st.crashed = false; st.crashT = 0;
+    st.jumpPhase = st.jumpHeight = 0;
   }
 
   // 输入（-1 左 … 1 右？不：-1 左，+1 右，见 input 映射；这里 s>0 = 右转）
-  function step(dt, sTarget) {
+  function step(dt, sTarget, launch = false) {
     if (st.crashed) { st.crashT += dt; return; }
+    if (launch || st.jumpPhase > 0) {
+      const p = st.jumpPhase + dt / 1.12;
+      st.jumpPhase = p < 1 ? p : 0;
+      st.jumpHeight = 4 * 1.65 * st.jumpPhase * (1 - st.jumpPhase);
+    }
 
     // ---- 输入平滑（贴边时叠加朝谷心的回正辅助，避免在雪堤上磨停）----
     const wallBias = U.smoothstep(CFG.CORRIDOR - 7, CFG.CORRIDOR + 3, Math.abs(st.x)) * 0.6;
@@ -58,7 +65,7 @@ function makePhysics(seed) {
     const v = st.speed;
     const omegaMax = CFG.TURN_RATE / (1 + v * CFG.TURN_SPEED_DAMP);
     const omegaByGrip = 34 / Math.max(v, 2); // 侧向抓地上限（保证 25m/s 时半径 ~18m，可躲树）
-    const turnLimit = Math.min(omegaMax, omegaByGrip);
+    const turnLimit = Math.min(omegaMax, omegaByGrip) * (st.jumpPhase ? 0.58 : 1);
     // 松手后逐渐朝下坡回正，仍受当前速度的抓地上限约束。
     const recenter = U.clamp(-st.heading * CFG.RECENTER_RATE, -turnLimit, turnLimit);
     const omega = -st.steer * turnLimit + recenter * (1 - Math.abs(st.steer));
@@ -152,49 +159,81 @@ function makePhysics(seed) {
   return { st, step, crash, reset };
 }
 
-// ---- 输入：鼠标 / 触控 / 键盘统一 ----
+// ---- 触屏操作：左右压刃、上划起跳 ----
 function makeInput(el) {
-  const inp = { steer: 0 };
-  const held = [];
-  const directions = new Map([['arrowleft', -1], ['a', -1], ['arrowright', 1], ['d', 1]]);
-  let pointerX = null;
-  function curve(x) {
-    if (Math.abs(x) < 0.035) return 0;
-    const c = Math.sign(x) * Math.pow(Math.abs(x), CFG.STEER_EXP);
-    return U.clamp(c * 1.18, -1, 1);
-  }
-  function update() {
-    if (held.length) inp.steer = directions.get(held[held.length - 1]);
-    else inp.steer = pointerX === null ? 0 : curve(pointerX * 2 - 1);
+  let finger = null, jumpPending = false;
+  let target = 0, startX = 0, initialTurn = 0;
+  let swipeX = 0, swipeY = 0, jumped = false;
+  let throwWidth = 90, jumpDistance = 40;
+
+  function begin(touch) {
+    finger = touch.identifier;
+    startX = swipeX = touch.clientX;
+    swipeY = touch.clientY;
+    jumped = false;
+    const width = window.innerWidth;
+    const shortSide = Math.min(width, window.innerHeight);
+    throwWidth = U.clamp(shortSide * 0.23, 60, 130);
+    jumpDistance = U.clamp(shortSide * 0.095, 32, 58);
+    // The middle third is neutral for starting a straight glide or jump.
+    const side = startX / width * 2 - 1;
+    initialTurn = Math.sign(side) * U.smoothstep(0.30, 0.84, Math.abs(side));
+    target = initialTurn;
   }
 
-  el.addEventListener('mousemove', (e) => {
-    if (!held.length && !e.sourceCapabilities?.firesTouchEvents) pointerX = e.clientX / window.innerWidth;
-  }, { passive: true });
-  el.addEventListener('mouseleave', () => { pointerX = null; });
-  function readTouch(e) {
-    pointerX = e.touches.length ? e.touches[0].clientX / window.innerWidth : null;
-  }
-  el.addEventListener('touchstart', readTouch, { passive: true });
-  el.addEventListener('touchmove', (e) => {
-    readTouch(e);
-    e.preventDefault();
-  }, { passive: false });
-  el.addEventListener('touchend', readTouch, { passive: true });
-  el.addEventListener('touchcancel', readTouch, { passive: true });
-  el.addEventListener('keydown', (e) => {
-    const key = e.key.toLowerCase();
-    if (directions.has(key) && !e.repeat && !held.includes(key)) {
-      held.push(key);
-      pointerX = null;
+  function move(touch) {
+    const dx = touch.clientX - startX;
+    // A short horizontal drag can reach full edge on phones and tablets.
+    const drag = Math.sign(dx) * Math.max(0, Math.abs(dx) - 4) / throwWidth;
+    target = U.clamp(initialTurn + drag, -1, 1);
+    const across = Math.abs(touch.clientX - swipeX);
+    const up = swipeY - touch.clientY;
+    if (!jumped && up >= jumpDistance && up > across * 1.35) {
+      jumpPending = true;
+      jumped = true;
     }
-  });
-  el.addEventListener('keyup', (e) => {
-    const index = held.indexOf(e.key.toLowerCase());
-    if (index >= 0) held.splice(index, 1);
-  });
-  inp.reset = () => { pointerX = null; held.length = 0; inp.steer = 0; };
-  el.addEventListener('blur', inp.reset);
-  inp.update = update;
-  return inp;
+    // Let a player carve first, then flick upward from the new hand position.
+    if (up < 0 || across > jumpDistance && across > Math.abs(up) * 1.6) {
+      swipeX = touch.clientX;
+      swipeY = touch.clientY;
+    }
+  }
+
+  function findFinger(touches) {
+    for (let i = 0; i < touches.length; i++) {
+      if (touches[i].identifier === finger) return touches[i];
+    }
+    return null;
+  }
+  el.addEventListener('touchstart', (e) => {
+    if (finger === null) begin(e.changedTouches[0]);
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    const touch = findFinger(e.changedTouches);
+    if (touch) { move(touch); e.preventDefault(); }
+  }, { passive: false });
+  function finish(e) {
+    const last = findFinger(e.changedTouches);
+    if (!last) return;
+    if (e.type === 'touchend') move(last);
+    else jumpPending = false;
+    finger = null;
+    target = 0;
+    if (e.targetTouches.length) begin(e.targetTouches[0]);
+  }
+  el.addEventListener('touchend', finish, { passive: true });
+  el.addEventListener('touchcancel', finish, { passive: true });
+
+  const input = {
+    steer: 0,
+    update() { input.steer = target; },
+    consumeJump() {
+      const result = jumpPending;
+      jumpPending = false;
+      return result;
+    },
+    reset() { finger = null; target = 0; jumpPending = false; input.steer = 0; },
+  };
+  window.addEventListener('blur', input.reset);
+  return input;
 }

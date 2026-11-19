@@ -18,6 +18,7 @@ const MODULES = [
   'sky.js',
   'terrain.js',
   'trees.js',
+  'rocks.js',
   'particles.js',
   'skier.js',
   'physics.js',
@@ -33,7 +34,13 @@ const banner = (f) => `\n/* ================= ${f} ================= */\n`;
 
 const css = read(path.join(srcDir, 'style.css'));
 const three = read(path.join(root, 'vendor', 'three.min.js'));
-const game = MODULES.map((f) => banner(f) + read(path.join(srcDir, f))).join('\n');
+function imageData(file) {
+  const type = path.extname(file).slice(1);
+  return 'data:image/' + type + ';base64,' + fs.readFileSync(path.join(root, file)).toString('base64');
+}
+const game = MODULES.map((f) => banner(f) + read(path.join(srcDir, f))).join('\n')
+  .replace('__SKY_PANORAMA__', () => imageData('assets/sky-gornergrat.webp'))
+  .replace(/assets\/spruce-(?:branches|crown-[123])\.webp/g, imageData);
 
 const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -72,21 +79,22 @@ ${css}
   <div id="boot" class="screen">
     <div class="panel boot-panel">
       <div class="logo"><span class="logo-zh">雪线</span><span class="logo-en">SNOWLINE</span></div>
-      <div class="tagline">蓝旗指引宽线，橙旗标记林间捷径。</div>
-      <div class="field">
+      <div class="tagline mobile-controls">左右滑动转向，上划前空翻越过矮石。</div>
+      <div class="field mobile-controls">
         <label for="inp-name">你的名字</label>
         <input id="inp-name" type="text" maxlength="16" placeholder="为成绩署名（选填）" autocomplete="off">
       </div>
-      <button id="btn-start" class="btn primary big">开始滑行</button>
+      <button id="btn-start" class="btn primary big mobile-controls">开始滑行</button>
+      <div id="phone-entry" hidden><img width="132" height="132" alt="手机游戏入口二维码" src="${imageData('assets/play-on-phone.png')}"><p>手机扫码滑行</p></div>
       <button id="btn-board-boot" class="btn ghost">排行榜</button>
-      <div class="hint">鼠标或 ← → 转向 · 触屏按住左右滑动</div>
     </div>
+    <small class="photo-credit">戈尔内格拉特远景摄影 · <a href="https://commons.wikimedia.org/wiki/File:Panorama_vom_Gornergrat_-_Monte_Rosa-Liskamm-Castor-Pollux-Breithorn-Kl._Matterhorn.jpg" target="_blank" rel="noopener">Tobi 87</a> · <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a></small>
   </div>
 
   <!-- 结算界面 -->
   <div id="over" class="screen" hidden>
     <div class="panel over-panel">
-      <div class="over-title">撞树了！</div>
+      <div class="over-title" id="over-title"></div>
       <div class="over-score"><b id="over-score">0</b><i>m</i></div>
       <div class="over-sub" id="over-sub"></div>
       <div id="splits"></div>

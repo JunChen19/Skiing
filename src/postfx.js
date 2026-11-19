@@ -81,7 +81,7 @@ function makePostFX(renderer, scene, camera) {
   const compMat = new THREE.ShaderMaterial({
     uniforms: {
       tD: { value: null }, tB: { value: null },
-      uBloom: { value: 0.55 }, uExposure: { value: 1.0 },
+      uBloom: { value: 0.10 }, uExposure: { value: 1.10 },
       uRcp: { value: new THREE.Vector2() }, uTime: { value: 0 },
       uGrain: { value: 0.003 }, uAA: { value: 1 },
     },
@@ -128,12 +128,12 @@ function makePostFX(renderer, scene, camera) {
         // 质感调色：柔和对比 + 饱和 + 冷暖分区（阴影偏蓝、高光偏暖）
         col = mix(col, col * col * (3.0 - 2.0 * col), 0.20);
         float lu = lumaOf(col);
-        col = mix(vec3(lu), col, 1.07);
+        col = mix(vec3(lu), col, 0.99);
         col += (1.0 - lu) * vec3(0.012, 0.022, 0.040);
-        col *= mix(vec3(1.0), vec3(1.035, 1.010, 0.965), lu);
+        col *= mix(vec3(1.0), vec3(1.012, 1.005, 0.995), lu);
         // 暗角
         vec2 q = vUv - 0.5;
-        float vig = 1.0 - 0.34 * smoothstep(0.35, 1.05, length(q) * 1.55);
+        float vig = 1.0 - 0.095 * smoothstep(0.35, 1.05, length(q) * 1.55);
         col *= vig;
         // 颗粒
         float g = fract(sin(dot(vUv * (1.0 + uTime * 0.001), vec2(12.9898, 78.233))) * 43758.5453);

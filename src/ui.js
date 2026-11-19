@@ -25,11 +25,16 @@ function makeUI(handlers) {
       localStorage.setItem(CFG.NAME_KEY, name);
       handlers.onStart(name);
     });
-    el.name.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.start.click(); });
     $('btn-new').addEventListener('click', handlers.onNew);
     el.retry.addEventListener('click', () => handlers.onRetry());
     el.resume.addEventListener('click', () => handlers.onResume());
     el.quit.addEventListener('click', () => handlers.onQuit());
+    bindBoard();
+    el.mute.addEventListener('click', () => handlers.onMute());
+    el.pauseBtn.addEventListener('click', () => handlers.onPause());
+  }
+
+  function bindBoard() {
     el.boardBoot.addEventListener('click', () => openBoard('boot'));
     el.boardOver.addEventListener('click', () => openBoard('over'));
     el.boardBack.addEventListener('click', () => {
@@ -37,8 +42,6 @@ function makeUI(handlers) {
       if (boardReturnTo === 'over') el.over.hidden = false;
       else el.boot.hidden = false;
     });
-    el.mute.addEventListener('click', () => handlers.onMute());
-    el.pauseBtn.addEventListener('click', () => handlers.onPause());
   }
 
   function openBoard(from) {
@@ -79,6 +82,7 @@ function makeUI(handlers) {
 
   return {
     bind,
+    bindBoard,
     showBoot() {
       el.loading.hidden = true;
       el.hud.hidden = true; el.over.hidden = true; el.board.hidden = true; el.pause.hidden = true;
@@ -97,7 +101,8 @@ function makeUI(handlers) {
       el.dist.textContent = Math.floor(dist);
       el.best.textContent = best > 0 ? Math.floor(best) + 'm' : '—';
     },
-    showOver(score, isBest, splits) {
+    showOver(score, isBest, splits, obstacle) {
+      $('over-title').textContent = obstacle === 'rock' ? '撞上了岩石' : '撞上了雪松';
       el.splits.replaceChildren();
       for (const split of splits.slice(-3)) {
         const row = document.createElement('div');

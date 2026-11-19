@@ -172,8 +172,14 @@ body {
 #splits { margin-top: 12px; }
 .screen { padding: 12px; overflow: auto; }
 .panel { margin: auto; }
-#boot { justify-content: flex-start; background: linear-gradient(90deg,rgba(11,32,43,.38),transparent 75%); backdrop-filter: none; -webkit-backdrop-filter: none; }
-.boot-panel { margin: auto auto auto clamp(10px,7vw,130px); text-align: left; background: rgba(15,40,50,.92); border-radius: 16px; }
+#boot { justify-content: flex-start; background: linear-gradient(90deg,rgba(10,24,33,.90),rgba(15,32,44,.55) 30%, transparent 68%); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.boot-panel { margin: auto auto auto clamp(10px,7vw,130px); text-align: left; width: min(85vw,330px); padding: 0; background: none; border: 0; box-shadow: none; }
+.desktop-preview .mobile-controls { display: none; }
+#phone-entry { margin: 24px 0 10px; }
+#phone-entry img { display: block; image-rendering: pixelated; }
+#phone-entry p { margin: 10px 0 20px; font-size: 15px; }
+.photo-credit { position: absolute; right: max(12px,env(safe-area-inset-right)); bottom: max(8px,env(safe-area-inset-bottom)); font-size: 10px; color: #e4ebef; background: rgba(19,32,40,.70); padding: 3px 7px; }
+.photo-credit a { color: inherit; }
 .boot-panel .logo-zh { text-indent: 0; background: none; -webkit-text-fill-color: #f5f6ef; filter: none; }
 .boot-panel .logo-en { text-indent: 0; color: #b8d9d7; }
 .btn.primary { background: #de683f; box-shadow: none; color: #fff; }
@@ -184,5 +190,14 @@ body {
   .hud-buttons { gap: 4px; }
   .icon-btn { width: 34px; height: 36px; }
   .hud-stage { left: 8px; }
-  .boot-panel { margin: auto; }
+  #boot { background: linear-gradient(0deg,rgba(11,23,32,.97),rgba(13,30,40,.86) 25%,rgba(17,35,46,.65) 43%,transparent 74%); }
+  .boot-panel { margin: auto auto max(32px,env(safe-area-inset-bottom)); width: min(86vw,340px); }
+  .boot-panel .logo-zh { font-size: clamp(46px,8vh,72px); }
+  .boot-panel .tagline { color: #e2eae9; margin-bottom: 15px; }
+}
+@media (max-height: 470px) and (orientation: landscape) {
+  .boot-panel .logo-zh { font-size: 38px; }
+  .boot-panel .logo { margin-bottom: 7px; }
+  .boot-panel .tagline, .boot-panel .btn { margin-block: 6px; }
+  .boot-panel .field input, .boot-panel .btn { padding-block: 8px; }
 }

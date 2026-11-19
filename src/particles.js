@@ -157,12 +157,30 @@ function makeTracks(scene) {
   const stamps = new THREE.BufferAttribute(born, 1).setUsage(THREE.DynamicDrawUsage);
   geo.setAttribute('position', position);
   geo.setAttribute('born', stamps);
+  const across = new Float32Array(capacity * 12);
+  for (let i = 0; i < across.length; i += 6) across.set([-1, 1, -1, -1, 1, 1], i);
+  geo.setAttribute('across', new THREE.BufferAttribute(across, 1));
   const material = new THREE.ShaderMaterial({
     uniforms: { time: terrainTimeUniform },
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-    vertexShader: 'attribute float born; uniform float time; varying float fade; void main(){fade=1.-smoothstep(1.,5.,time-born); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader: 'varying float fade; void main(){gl_FragColor=vec4(.29,.46,.59,fade*.36);}',
+    vertexShader: `
+      attribute float born, across;
+      uniform float time;
+      varying float fade, edge;
+      void main() {
+        edge = across;
+        fade = 1. - smoothstep(1., 5., time - born);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
+      }`,
+    fragmentShader: `
+      varying float fade, edge;
+      void main() {
+        float cut = 1. - smoothstep(0.05, 0.84, abs(edge + 0.22));
+        float lip = 1. - smoothstep(0., 0.32, abs(edge - 0.57));
+        vec3 tint = mix(vec3(0.30,0.42,0.53), vec3(1.12,1.15,1.18), lip);
+        gl_FragColor = vec4(tint, fade * (0.24 * cut + 0.29 * lip));
+      }`,
   });
   const mesh = new THREE.Mesh(geo, material);
   mesh.frustumCulled = false;
@@ -180,7 +198,7 @@ function makeTracks(scene) {
   function append(tails, heading, now) {
     if (started && prev[0].distanceToSquared(tails[0]) < 0.09) return;
     if (started) {
-      const dx = Math.cos(heading) * 0.038, dz = -Math.sin(heading) * 0.038;
+        const dx = Math.cos(heading) * 0.074, dz = -Math.sin(heading) * 0.074;
       let v = cursor * 12;
       for (let i = 0; i < 2; i++) {
         const a = prev[i], b = tails[i];
@@ -199,5 +217,5 @@ function makeTracks(scene) {
     prev[0].copy(tails[0]); prev[1].copy(tails[1]); started = true;
   }
   reset();
-  return { append, reset };
+    return { append, reset, breakLine() { started = false; } };
 }

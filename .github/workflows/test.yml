@@ -12,6 +12,6 @@ jobs:
         with:
           node-version: 24
       - run: node test/smoke.js
-      - run: node --test test/steering.js test/leaderboard.js
+      - run: node --test test/steering.js test/rocks.js test/jump.js test/leaderboard.js
       - run: node build.js
       - run: git diff --exit-code -- index.html

@@ -49,42 +49,78 @@ function mergeTreeParts(parts) {
   return geo;
 }
 
-function makeTrees(scene, seed) {
+function makeTrees(scene, seed, sunDirection = new THREE.Vector3(-0.34, 0.52, 0.78)) {
   const BAND = CFG.TREE_ROW_M;
   const CORRIDOR = CFG.CORRIDOR;
+  const treeHeights = [6.8, 7.8, 6.1, 2.4];
 
-  // ---- 几何体 ----
+  // The near boughs and their distant silhouettes are baked from the same
+  // model. The single-file build embeds these four lossless textures.
+  const textureLoader = typeof document === 'undefined' ? null : new THREE.TextureLoader();
+  function forestTexture(url) {
+    if (!textureLoader) return null;
+    const texture = textureLoader.load(url);
+    texture.encoding = THREE.sRGBEncoding;
+    return texture;
+  }
+
   function pineGeo(variant) {
     const rng = mulberry32(501 + variant);
-    const parts = [];
-    const trunk = new THREE.CylinderGeometry(0.08, 0.22, 4.6, 7);
-    trunk.translate(0, 2.3, 0);
-    parts.push({ geo: trunk, cBottom: '#705549', cTop: '#9c8065' });
-    // Two irregular rings per whorl form drooping boughs with a snowy upper face.
-    for (let level = 0; level < 5; level++) {
-      const y = 1.2 + level * 0.78;
-      const r = (1.45 - level * 0.24) * (0.82 + variant * 0.14);
-      const phase = rng() * 6.28;
-      const vertices = [], indices = [];
-      for (let j = 0; j < 12; j++) {
-        const a = phase + j * Math.PI / 6;
-        const reach = r * (j % 2 ? 0.47 : 0.93 + rng() * 0.20);
-        const tip = y + (j % 2 ? 0.26 : -rng() * 0.24);
-        const dx = Math.cos(a) * reach, dz = Math.sin(a) * reach;
-        vertices.push(dx, tip, dz, dx * 0.83, tip + 0.24, dz * 0.83);
-      }
-      vertices.push(0.09 * variant, y + 1.1, -0.05, 0, y + 0.24, 0);
-      for (let j = 0; j < 12; j++) {
-        const a = 2 * j, b = 2 * ((j + 1) % 12);
-        indices.push(a, a+1, b, b, a+1, b+1, a+1, 24, b+1, b, 25, a);
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-      geo.setIndex(indices);
-      geo.computeVertexNormals();
-      parts.push({ geo, cBottom: '#345e55', cTop: level === 0 ? '#689085' : (level < 3 ? '#a6c3b7' : '#e7efec') });
+    const pos = [], colors = [], uv = [], indices = [];
+    const height = treeHeights[variant];
+    const reach = [1.75, 1.60, 1.95][variant];
+    const trunk = new THREE.CylinderGeometry(0.033, 0.215, height, 8, 1, true);
+    const trunkPos = trunk.attributes.position, trunkUv = trunk.attributes.uv;
+    for (let i = 0; i < trunkPos.count; i++) {
+      pos.push(trunkPos.getX(i), trunkPos.getY(i) + height / 2, trunkPos.getZ(i));
+      colors.push(1, 1, 1);
+      uv.push(trunkUv.getX(i) * 0.96 + 0.02, 0.012 + trunkUv.getY(i) * 0.08);
     }
-    return mergeTreeParts(parts);
+    for (const index of trunk.index.array) indices.push(index);
+    trunk.dispose();
+
+    const tiers = 11;
+    for (let i = 0; i < tiers; i++) {
+      const t = i / (tiers - 1);
+      const baseY = height * (0.16 + 0.83 * t);
+      const radius = reach * (0.14 + 0.86 * Math.pow(1 - t, 0.75));
+      const count = t < 0.7 ? 8 : 6;
+      const phase = i * 2.40 + rng() * 0.60;
+      for (let j = 0; j < count; j++) {
+        const a = phase + 2 * Math.PI * (j + rng() * 0.35) / count;
+        const dx = Math.cos(a), dz = Math.sin(a);
+        const length = radius * (0.72 + rng() * 0.43);
+        const root = baseY + (rng() - 0.5) * 0.40;
+        const width = length * 0.46;
+        const sag = length * (0.25 + rng() * 0.22) - t * 0.12;
+        const vCenter = 1 - (rng() < 0.50 ? 112 : 336) / 512;
+        const uSteps = 2;
+        const start = pos.length / 3;
+        for (let k = 0; k <= uSteps; k++) {
+          const f = k / uSteps;
+          const y = root - sag * f - Math.sin(f * Math.PI) * length * 0.10;
+          // A folded bough has a raised crown and drooping twig ends.
+          // Its shaded interior stays visible between loaded branches.
+          for (let side = -1; side <= 1; side++) {
+            const across = side * width * (0.62 + f * 0.38);
+            pos.push(dx * length * f - dz * across, y - Math.abs(across) * 0.58, dz * length * f + dx * across);
+            const shade = 0.54 + 0.37 * f + 0.09 * t;
+            colors.push(shade * 0.96, shade, shade * (1.03 - 0.04 * f));
+            uv.push((3 + f * 505) / 512, vCenter + side * 108 / 512);
+          }
+          if (k === 0) continue;
+          const v = start + (k - 1) * 3;
+          indices.push(v,v+1,v+3, v+1,v+4,v+3, v+1,v+2,v+4, v+2,v+5,v+4);
+        }
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return geo;
   }
   function deadGeo() {
     const parts = [];
@@ -102,10 +138,40 @@ function makeTrees(scene, seed) {
     return mergeTreeParts(parts);
   }
 
-  const treeMat = new THREE.MeshStandardMaterial({
-    vertexColors: true, roughness: 0.92, metalness: 0,
+  const atlas = forestTexture('assets/spruce-branches.webp');
+  if (atlas) atlas.anisotropy = 2;
+  const treeMat = new THREE.MeshLambertMaterial({
+    vertexColors: true, map: atlas, alphaTest: 0.31, side: THREE.DoubleSide,
   });
-  const pineShapes = [pineGeo(0), pineGeo(1), pineGeo(2), deadGeo()];
+  const cutoutDepth = new THREE.MeshDepthMaterial({
+    depthPacking: THREE.RGBADepthPacking, map: atlas, alphaTest: 0.31, side: THREE.DoubleSide,
+  });
+  function crownCard(texture, variant) {
+    const width = 5.1, height = treeHeights[variant] + 0.35;
+    const positions = [], uvs = [], indices = [];
+    for (let j=0; j<2; j++) {
+      const x = j === 0 ? width*0.5 : 0, z = j === 1 ? width*0.5 : 0;
+      positions.push(-x,0,-z,x,0,z,x,height,z,-x,height,-z);
+      uvs.push(0,0,1,0,1,1,0,1);
+      const n=j*4;
+      indices.push(n,n+1,n+2,n,n+2,n+3);
+    }
+    const card=new THREE.BufferGeometry();
+    card.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+    card.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
+    card.setIndex(indices);
+    return { shape: card, mat: new THREE.MeshBasicMaterial({
+      map: forestTexture(texture), color: 0xbcc8c5, alphaTest: 0.29, side: THREE.DoubleSide,
+    }) };
+  }
+  const detailed = [pineGeo(0), pineGeo(1), pineGeo(2)];
+  const crowns = [
+    crownCard('assets/spruce-crown-1.webp', 0),
+    crownCard('assets/spruce-crown-2.webp', 1),
+    crownCard('assets/spruce-crown-3.webp', 2),
+  ];
+  const bareMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const dead = deadGeo();
   // Trail-edge pennants mark the broad line in blue and the forest cut in ochre.
   const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.035, 0.042, 1.55, 5),
     new THREE.MeshStandardMaterial({ color: 0x536d75 }), 96);
@@ -116,8 +182,11 @@ function makeTrees(scene, seed) {
   for (const mesh of [poles, flags]) { mesh.frustumCulled = false; mesh.count = 0; scene.add(mesh); }
   const batches = [];
   for (let range = 0; range < 2; range++) {
-    for (const shape of pineShapes) {
-      const mesh = new THREE.InstancedMesh(shape, treeMat, 1600);
+    for (let kind = 0; kind < 4; kind++) {
+      const shape = kind === 3 ? dead : (range === 0 ? detailed[kind] : crowns[kind].shape);
+      const mat = kind === 3 ? bareMat : (range === 0 ? treeMat : crowns[kind].mat);
+      const mesh = new THREE.InstancedMesh(shape, mat, 1600);
+      if (kind !== 3) mesh.customDepthMaterial = cutoutDepth;
       mesh.setColorAt(0, new THREE.Color(1, 1, 1));
       mesh.castShadow = range === 0;
       mesh.frustumCulled = false;
@@ -125,6 +194,66 @@ function makeTrees(scene, seed) {
       scene.add(mesh);
       batches.push(mesh);
     }
+  }
+
+  // On the mobile tier, reuse one small soft shadow stamp. Five samples
+  // along its length let it follow the slope without a shadow-map pass.
+  const stampSize = 64, stampPixels = new Uint8Array(stampSize * stampSize * 4);
+  for (let iy = 0; iy < stampSize; iy++) {
+    for (let ix = 0; ix < stampSize; ix++) {
+      const t = (iy + 0.5) / stampSize, side = (ix + 0.5) / stampSize * 2 - 1;
+      const crown = Math.max(0, Math.sin(Math.PI * t)) * (0.91 - 0.48*t);
+      const width = crown * (0.85 + 0.11*Math.cos(46*t + side*1.5));
+      const body = 1 - U.smoothstep(width * 0.56, width+0.09, Math.abs(side));
+      const edge = U.smoothstep(0,0.085,t) * (1-U.smoothstep(0.92,1,t));
+      const p = 4 * (iy*stampSize+ix);
+      stampPixels[p] = stampPixels[p+1] = stampPixels[p+2] = 255;
+      stampPixels[p+3] = Math.round(255 * body * edge * (0.9-0.38*t));
+    }
+  }
+  const stamp = new THREE.DataTexture(stampPixels, stampSize, stampSize);
+  stamp.magFilter = stamp.minFilter = THREE.LinearFilter; stamp.needsUpdate = true;
+  const shadowCapacity = 400, stations = 5;
+  const shadowPos = new THREE.BufferAttribute(new Float32Array(shadowCapacity * stations * 6),3);
+  shadowPos.setUsage(THREE.DynamicDrawUsage);
+  const shadowUv = [], shadowIdx = [];
+  for (let i=0; i<shadowCapacity; i++) {
+    for (let j=0; j<stations; j++) {
+      const t=j/(stations-1), k=(i*stations+j)*2;
+      shadowUv.push(0,t,1,t);
+      if (j) shadowIdx.push(k-2,k-1,k, k-1,k+1,k);
+    }
+  }
+  const shadowGeo = new THREE.BufferGeometry();
+  shadowGeo.setAttribute('position',shadowPos);
+  shadowGeo.setAttribute('uv',new THREE.Float32BufferAttribute(shadowUv,2));
+  shadowGeo.setIndex(shadowIdx); shadowGeo.setDrawRange(0,0);
+  const softShadows = new THREE.Mesh(shadowGeo,new THREE.MeshBasicMaterial({
+    map:stamp, color:0x435973, transparent:true, opacity:0.40, depthWrite:false,
+    polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2, side:THREE.DoubleSide,
+  }));
+  softShadows.frustumCulled = false; softShadows.visible = false; scene.add(softShadows);
+  const sunXZ = Math.hypot(sunDirection.x,sunDirection.z) || 1;
+  const sx=-sunDirection.x/sunXZ, sz=-sunDirection.z/sunXZ;
+  let quality=2, lastPlayerZ=0, forestVisible=true;
+
+  function shadowVertices(tree) {
+    if (tree.shadow) return tree.shadow;
+    const points = new Float32Array(stations*6);
+    const width = (tree.shape===3 ? 0.65 : 1.85)*tree.s;
+    const height = treeHeights[tree.shape] * tree.s;
+    const slope = terrainHeight(tree.x+sx,tree.z+sz,seed)-tree.ground;
+    const length = U.clamp(height/(sunDirection.y/sunXZ+slope),height*0.7,height*2.2);
+    for (let j=0; j<stations; j++) {
+      const d = -0.5 + length*j/(stations-1);
+      for (const sign of [-1,1]) {
+        const x = tree.x + sx*d + sz*width*sign;
+        const z = tree.z + sz*d - sx*width*sign;
+        const k=j*6 + (sign===1 ? 3 : 0);
+        points[k]=x; points[k+1]=terrainHeight(x,z,seed)+0.025; points[k+2]=z;
+      }
+    }
+    tree.shadow=points; return points;
   }
 
   // ---- 行带生成（确定性）----
@@ -215,6 +344,8 @@ function makeTrees(scene, seed) {
   const P = new THREE.Vector3(), S = new THREE.Vector3();
   const C = new THREE.Color();
   function rebuildInstances(playerZ = 0) {
+    lastPlayerZ=playerZ;
+    let shadowCount=0;
     for (const mesh of batches) mesh.count = 0;
     poles.count = flags.count = 0;
     const lane = {};
@@ -237,7 +368,17 @@ function makeTrees(scene, seed) {
     if (flags.instanceColor) flags.instanceColor.needsUpdate = true;
     for (const arr of chunkTrees.values()) {
       for (const t of arr) {
-        const mesh = batches[t.shape + (Math.abs(t.z - playerZ) < 110 ? 0 : 4)];
+        // Even a full 77-degree carve cannot bring an entire chunk behind
+        // the follow camera into view. Keep the collision chunks independent.
+        if (t.z - playerZ > 72) continue;
+        const dz=playerZ-t.z;
+        // Rebuilds occur every 60 m. Allow for that entire advance when
+        // choosing the forward range; the previous chunk needs less detail.
+        const near = dz >= -12 && dz < (quality === 0 ? 72 : 100);
+        const mesh = batches[t.shape + (near ? 0 : 4)];
+        if (quality === 0 && dz >= -12 && dz < 128 && shadowCount < shadowCapacity) {
+          shadowPos.array.set(shadowVertices(t),shadowCount++ * stations*6);
+        }
         E.set(t.tilt * 0.4, t.rot, t.tilt);
         Q.setFromEuler(E);
         P.set(t.x, t.ground - 0.08, t.z);
@@ -250,6 +391,8 @@ function makeTrees(scene, seed) {
         mesh.setColorAt(index, C);
       }
     }
+    shadowGeo.setDrawRange(0,shadowCount*(stations-1)*6);
+    if (shadowCount) { shadowPos.updateRange.count=shadowCount*stations*6; shadowPos.needsUpdate=true; }
     for (const mesh of batches) {
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -273,10 +416,17 @@ function makeTrees(scene, seed) {
     chunkTrees.clear();
   }
 
+  function setQuality(q) {
+    if (q===quality) return;
+    quality=q; softShadows.visible=forestVisible && q===0;
+    rebuildInstances(lastPlayerZ);
+  }
+
   function setVisible(v) {
+    forestVisible=v; softShadows.visible=v && quality===0;
     for (const mesh of batches) mesh.visible = v;
     poles.visible = flags.visible = v;
   }
 
-  return { syncChunks, rebuildInstances, nearTrees, reset, setVisible };
+  return { syncChunks, rebuildInstances, nearTrees, reset, setVisible, setQuality };
 }

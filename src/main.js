@@ -6,16 +6,35 @@
   if (typeof document === 'undefined') return;   // 供 node 冒烟测试跳过
 
   const canvas = document.getElementById('c');
-  const isMobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || 'ontouchstart' in window;
+  const isMobile = navigator.maxTouchPoints > 0 &&
+    (matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent));
+  document.getElementById('app').classList.toggle('desktop-preview', !isMobile);
+  document.getElementById('phone-entry').hidden = isMobile;
+  const board = makeLeaderboard();
+  const boardHandlers = {
+    onBoard: () => board.top(50),
+    boardModeText() {
+      if (board.mode === 'self-hosted') return '共享排行榜';
+      return board.isCloud ? '☁ 全球共享' : '💾 本机记录（未配置共享榜）';
+    },
+  };
 
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   } catch (e) {
+    if (!isMobile) {
+      const preview = makeUI(boardHandlers);
+      preview.bindBoard();
+      preview.showBoot();
+      return;
+    }
     document.getElementById('loading').textContent = '此设备/浏览器不支持 WebGL，无法运行游戏';
     return;
   }
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.NoToneMapping;    // 色调映射在后处理里做
 
@@ -26,7 +45,7 @@
 
   // ---- 光照：侧后方暖阳（顺光照亮雪面）+ 天空环境光 ----
   const sunDirRef = new THREE.Vector3(-0.34, 0.52, 0.78).normalize();
-  const sun = new THREE.DirectionalLight(new THREE.Color('#fff1e0').convertSRGBToLinear(), 1.55);
+  const sun = new THREE.DirectionalLight(new THREE.Color('#fff3df').convertSRGBToLinear(), 1.78);
   sun.castShadow = true;
   const SHADOW_RES = isMobile ? 1024 : 2048;
   sun.shadow.mapSize.set(SHADOW_RES, SHADOW_RES);
@@ -39,8 +58,8 @@
   sun.shadow.normalBias = 0.055;
   scene.add(sun, sun.target);
   const hemi = new THREE.HemisphereLight(
-    new THREE.Color('#cfe0f5').convertSRGBToLinear(),
-    new THREE.Color('#f0e6d8').convertSRGBToLinear(), 0.85
+    new THREE.Color('#c5dafa').convertSRGBToLinear(),
+    new THREE.Color('#d3dce3').convertSRGBToLinear(), 0.96
   );
   scene.add(hemi);
 
@@ -48,15 +67,15 @@
   let seed = (Math.random() * 2147483647) | 0;
   const sky = makeSky(scene, seed);
   const terrain = makeTerrain(scene, seed);
-  const treesMod = makeTrees(scene, seed);
+  const treesMod = makeTrees(scene, seed, sunDirRef);
+  const rocks = makeRocks(scene, seed);
   const particles = makeParticles(scene);
   const tracks = makeTracks(scene);
   const skier = buildSkier(scene, seed);
   const postfx = makePostFX(renderer, scene, camera);
   const phys = makePhysics(seed);
-  const input = makeInput(window);
+  const input = makeInput(canvas);
   const sfx = makeSfx();
-  const board = makeLeaderboard();
 
   const ui = makeUI({
     onStart(name) { sfx.init(); sfx.click(); startRun(); },
@@ -66,29 +85,29 @@
     onQuit() { sfx.click(); toMenu(); },
     onMute() { sfx.setMuted(!sfx.muted); ui.setMuteIcon(sfx.muted); },
     onPause() { if (state === 'RUN') togglePause(true); },
-    async onBoard() { return board.top(50); },
-    boardModeText() {
-      if (board.mode === 'self-hosted') return '共享排行榜';
-      return board.isCloud ? '☁ 全球共享' : '💾 本机记录（未配置共享榜）';
-    },
+    ...boardHandlers,
   });
   ui.bind();
   ui.setMuteIcon(sfx.muted);
 
   // ---- 质量自适应（可降可升）----
   let quality = 2;   // 2 高 / 1 中 / 0 低
+  let shadowAge = Infinity;
   function applyQuality(q) {
     quality = q;
-    const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.4 : 1.6);
-    renderer.setPixelRatio(dpr * [0.75, 0.90, 1][q]);
     sun.castShadow = q > 0;
     const size = q === 2 ? SHADOW_RES : SHADOW_RES / 2;
     sun.shadow.mapSize.set(size, size);
     postfx.setQuality(q);
+    terrain.setQuality(q);
+    treesMod.setQuality(q);
+    shadowAge = Infinity;
+    renderer.shadowMap.needsUpdate = true;
+    if (q > 0 && window.__SKI) updateSun();
     if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     onResize();
   }
-  applyQuality(2);
+  applyQuality(isMobile ? 1 : 2);
 
   // ---- 状态机 ----
   let state = 'MENU';          // MENU / RUN / CRASH / OVER / PAUSE
@@ -105,6 +124,7 @@
   ];
   const splits = [], routeBests = [];
   let stageIndex = 0, sector = 0, elapsed = 0, stageStart = 0, runId = 0;
+  let overRock = false, clearNoticeUntil = 0;
   function stageEnd() { return sectorDistance(sector, stages[stageIndex].end); }
   function timeStep(dt, oldDistance) {
     elapsed += dt;
@@ -135,10 +155,13 @@
     tracks.reset();
     sprayTime = 0;
     input.reset();
+    shadowAge = Infinity;
     accum = 0;
     Object.assign(prevState, phys.st);
     terrain.reset(seed);
     treesMod.reset(seed);
+    rocks.reset(seed);
+    rocks.sync(phys.st.z, 0);
     lastPk = -1;
     refreshWorld();
     terrain.finishNearest();
@@ -147,11 +170,14 @@
   }
 
   function startRun(freshSeed = true) {
+    if (!isMobile) return;
     hardReset(freshSeed);
     if (freshSeed) routeBests.length = 0;
     runId++;
     splits.length = 0;
     hudAt = 0;
+    overRock = false;
+    clearNoticeUntil = 0;
     stageIndex = sector = elapsed = stageStart = 0;
     clock.getDelta();
     timeScale = 1; trauma = 0;
@@ -169,18 +195,20 @@
   }
 
   function togglePause(on) {
-    if (on && state === 'RUN') { pausedFrom = state; state = 'PAUSE'; ui.showPause(true); }
+    if (on && state === 'RUN') { input.reset(); pausedFrom = state; state = 'PAUSE'; ui.showPause(true); }
     else if (!on && state === 'PAUSE') { clock.getDelta(); input.reset(); state = pausedFrom; ui.showPause(false); }
   }
 
   // ---- 撞树流程 ----
   let crashTimer = 0;
-  function doCrash() {
+  let crashObstacle = 'tree';
+  function doCrash(obstacle = 'tree') {
+    crashObstacle = obstacle;
     state = 'CRASH';
     crashTimer = 0;
     phys.crash();
     skier.startCrash({ x: phys.st.vx, y: 0, z: phys.st.vz });
-    particles.emitBurst(phys.st.x, phys.st.y, phys.st.z, 1.4);
+    particles.emitBurst(phys.st.x, phys.st.y + phys.st.jumpHeight, phys.st.z, 1.4);
     sfx.crash();
     trauma = 1;
     timeScale = CFG.SLOWMO;
@@ -192,7 +220,7 @@
     const score = Math.floor(phys.st.dist);
     const isBest = board.setLocalBest(score);
     const partial = { label: '本段 · ' + stages[stageIndex].name + '（未完成）', time: elapsed - stageStart, delta: null };
-    ui.showOver(score, isBest, [...splits, partial]);
+    ui.showOver(score, isBest, [...splits, partial], crashObstacle);
     if (isBest) sfx.newBest(); else sfx.over();
     const name = localStorage.getItem(CFG.NAME_KEY) || '无名滑雪者';
     const submittingRun = runId;
@@ -312,7 +340,7 @@
   let accum = 0;
   const H = 1 / 120;
   const animState = {}, prevState = {};
-  const interpolated = ['x', 'y', 'z', 'vx', 'vz', 'heading', 'lean', 'steer', 'compression', 'tuck'];
+  const interpolated = ['x', 'y', 'z', 'vx', 'vz', 'heading', 'lean', 'steer', 'compression', 'tuck', 'jumpHeight'];
 
   function frame() {
     requestAnimationFrame(frame);
@@ -334,11 +362,29 @@
           const heading = -Math.atan2(menuLane.x - phys.st.x, ahead);
           steer = U.clamp((phys.st.heading - heading) * 4.2, -1, 1);
         }
-        phys.step(H, steer);
+        let launch = false;
+        if (state === 'RUN') {
+          launch = input.consumeJump() && !phys.st.jumpPhase;
+          if (launch) sfx.whoosh();
+        } else if (!phys.st.jumpPhase) {
+          const st = phys.st;
+          const next = rocks.nextRock(st.x, st.z, st.vx, st.vz);
+          launch = next && next.distance < st.speed * 0.52;
+        }
+        phys.step(H, steer, launch);
         accum = Math.max(0, accum - H);
         if (state === 'RUN') {
           timeStep(H, prevState.dist);
           checkTrees(candidates);
+          if (!phys.st.crashed) {
+            const st = phys.st;
+            if (rocks.hits(st.x, st.z, st.jumpHeight)) doCrash('rock');
+            else if (st.jumpHeight > 0 && !overRock && rocks.hits(st.x, st.z, 0)) overRock = true;
+            else if (overRock && !st.jumpPhase) {
+              overRock = false;
+              clearNoticeUntil = elapsed + 1.1;
+            }
+          }
         }
       }
       if (state === 'MENU' && phys.st.dist > 320) hardReset(true);
@@ -357,25 +403,43 @@
     if (!st.crashed) {
       const alpha = U.sat(accum / H);
       for (const key of interpolated) animState[key] = U.lerp(prevState[key], st[key], alpha);
+      const phase = prevState.jumpPhase > 0 && st.jumpPhase === 0 ? 1 : st.jumpPhase;
+      animState.jumpPhase = U.lerp(prevState.jumpPhase, phase, alpha);
     }
     skier.update(animState, dt, terrainTimeUniform.value);
     terrain.contact.value.set(animState.x, animState.z, Math.sin(animState.heading), Math.cos(animState.heading));
-    if (!st.crashed) {
+    if (animState.jumpHeight > 0 || st.crashed) {
+      tracks.breakLine();
+    } else {
       tracks.append(skier.tails, animState.heading, terrainTimeUniform.value);
       emitSprayAtSkis(animState, dt);
     }
     particles.updateSpray(dt);
     particles.updateDrift(dt, camera.position);
     sfx.update(dt, st);
-    sky.update(camera, dt, st.z);
-    if (quality > 0) updateSun();
     updateCamera(dt, animState);
+    sky.update(camera, dt, st.z);
+    // Cache the shadow depth pass between updates. Limit the distance travelled
+    // between samples so the ski tips and trunk shadows stay attached at speed.
+    shadowAge += dt;
+    const shadowInterval = Math.min(quality === 2 ? 1 / 40 : 1 / 28, 0.35 / Math.max(st.speed, 1));
+    if (quality > 0 && shadowAge >= shadowInterval) {
+      updateSun();
+      renderer.shadowMap.needsUpdate = true;
+      shadowAge = 0;
+    }
 
     // Keep DOM updates independent of the render frequency.
     if (state === 'RUN' && elapsed >= hudAt) {
       hudAt = elapsed + 0.08;
-      ui.hud(st.speed * 3.6, st.dist, runBest, stages[stageIndex].name,
-        '距分段点 ' + Math.max(0, Math.ceil(stageEnd() - st.dist)) + ' m');
+      const next = rocks.nextRock(st.x, st.z, st.vx, st.vz);
+      const nearRock = next && next.distance < Math.max(15, st.speed * 1.6);
+      let cue = '距分段点 ' + Math.max(0, Math.ceil(stageEnd() - st.dist)) + ' m';
+      if (nearRock && !st.jumpPhase) {
+        cue = next.distance > st.speed * 0.80
+          ? '前方矮石 · ' + Math.ceil(next.distance) + ' m' : '↑ 现在上划空翻';
+      } else if (elapsed < clearNoticeUntil) cue = '已越过矮石';
+      ui.hud(st.speed * 3.6, st.dist, runBest, stages[stageIndex].name, cue);
     }
 
     // 自动降质（卡顿立即降）+ 缓慢升质（持续流畅才回升，带冷却防振荡）
@@ -407,6 +471,7 @@
       const [kLo, kHi] = terrain.rangeFor(st.z);
       treesMod.syncChunks(kLo, kHi);
       treesMod.rebuildInstances(phys.st.z);
+      rocks.sync(st.z, state === 'MENU' ? 0 : elapsed);
     }
     terrain.update(3.5);   // 地形构建按预算分帧推进，不卡主循环
   }
@@ -414,6 +479,10 @@
   // ---- 尺寸 / 可见性 / 杂项 ----
   function onResize() {
     const w = window.innerWidth, h = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.4 : 1.6);
+    const maxPixels = [480000, 960000, 1800000][quality];
+    const ratio = Math.min(dpr * [0.75, 0.90, 1][quality], Math.sqrt(maxPixels / (w * h)));
+    if (renderer.getPixelRatio() !== ratio) renderer.setPixelRatio(ratio);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
@@ -426,12 +495,6 @@
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && state === 'RUN') togglePause(true);
-  });
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
-      if (state === 'RUN') togglePause(true);
-      else if (state === 'PAUSE') togglePause(false);
-    }
   });
   document.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('gesturestart', (e) => e.preventDefault());

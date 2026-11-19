@@ -47,10 +47,10 @@ const CFG = {
   TREE_COLL_R: 0.62,      // 树干碰撞半径（含人体余量）
 
   // 摄像机
-  CAM_BACK: 8.6,
-  CAM_UP: 3.3,
-  CAM_AHEAD: 15,
-  CAM_FOV_BASE: 62,
+  CAM_BACK: 5.65,
+  CAM_UP: 2.56,
+  CAM_AHEAD: 13,
+  CAM_FOV_BASE: 60,
   CAM_FOV_SPEED: 0.09,
 
   // 粒子
