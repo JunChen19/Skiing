@@ -1,24 +1,35 @@
 /* ================= leaderboard.js ================= */
-// 排行榜双模式：配置了 Supabase = 全球共享；否则 localStorage 本机榜
+// 排行榜支持自建服务、Supabase 和浏览器本机记录。
 'use strict';
 
 function sanitizeName(raw) {
   return String(raw || '')
-    .replace(/[<>&"'`\\/\x00-\x1f]/g, '')
+    .replace(/[<>&"'`\\/\x00-\x1f\x7f]/g, '')
     .trim()
     .slice(0, 16);
 }
 
 function makeLeaderboard() {
-  const cfg = (typeof window !== 'undefined' && window.SKI_CONFIG) || {};
+  const browser = typeof window !== 'undefined' ? window : {};
+  const cfg = browser.SKI_CONFIG || {};
+  const selfHosted = browser.SKI_LOCAL_LEADERBOARD || cfg.LEADERBOARD_URL;
+  const endpoint = selfHosted ? new URL(selfHosted, browser.location.href) : null;
+  const apiHeaders = { Accept: 'application/json' };
+  if (endpoint) {
+    endpoint.searchParams.set('ruleset', cfg.LEADERBOARD_RULESET || 'snowline-v1');
+    if (/\.(ngrok-free\.(app|dev)|ngrok\.io)$/.test(endpoint.hostname)) {
+      apiHeaders['ngrok-skip-browser-warning'] = '1';
+    }
+  }
   const URL_BASE = (cfg.SUPABASE_URL || '').replace(/\/+$/, '');
-  const KEY = cfg.SUPABASE_ANON_KEY || '';
-  const isCloud = !!(URL_BASE && KEY);
+  const KEY = cfg.SUPABASE_PUBLISHABLE_KEY || cfg.SUPABASE_ANON_KEY || '';
+  const isCloud = !!(endpoint || (URL_BASE && KEY));
   const HEADERS = {
     'apikey': KEY,
-    'Authorization': 'Bearer ' + KEY,
     'Content-Type': 'application/json',
   };
+  // Legacy anon keys are JWTs. Publishable keys belong only in apikey.
+  if (KEY.startsWith('eyJ')) HEADERS.Authorization = 'Bearer ' + KEY;
 
   // ---- 本地模式 ----
   function localBoard() {
@@ -36,10 +47,8 @@ function makeLeaderboard() {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 12000);
     try {
-      const r = await fetch(
-        `${URL_BASE}/rest/v1/scores?select=name,score&order=score.desc&limit=50`,
-        { headers: HEADERS, signal: ctrl.signal }
-      );
+      const url = endpoint || `${URL_BASE}/rest/v1/scores?select=id,name,score&order=score.desc,created_at.asc,id.asc&limit=50`;
+      const r = await fetch(url, { headers: endpoint ? apiHeaders : HEADERS, signal: ctrl.signal });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const rows = await r.json();
       cache = { t: Date.now(), data: rows };
@@ -48,7 +57,7 @@ function makeLeaderboard() {
   }
 
   return {
-    mode: isCloud ? 'cloud' : 'local',
+    mode: endpoint ? 'self-hosted' : isCloud ? 'cloud' : 'local',
     isCloud,
 
     async top(n) {
@@ -56,7 +65,7 @@ function makeLeaderboard() {
       if (isCloud) {
         try { return await cloudTop(n); }
         catch (e) {
-          return [{ name: '(云端暂不可达)', score: 0, offline: true }];
+          return [{ offline: true }, ...localBoard().slice(0, n)];
         }
       }
       return localBoard().slice(0, n);
@@ -68,16 +77,25 @@ function makeLeaderboard() {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 12000);
         try {
-          const r = await fetch(`${URL_BASE}/rest/v1/scores`, {
+          const id = crypto.randomUUID();
+          const r = await fetch(endpoint || `${URL_BASE}/rest/v1/scores`, {
             method: 'POST',
-            headers: Object.assign({}, HEADERS, { 'Prefer': 'return=minimal' }),
-            body: JSON.stringify({ name, score: Math.floor(score) }),
+            headers: endpoint ? { ...apiHeaders, 'Content-Type': 'application/json' }
+              : { ...HEADERS, 'Prefer': 'return=minimal' },
+            body: JSON.stringify(endpoint
+              ? { name, score: Math.floor(score), runId: id }
+              : { id, name, score: Math.floor(score) }),
             signal: ctrl.signal,
           });
           if (!r.ok && r.status !== 201) throw new Error('HTTP ' + r.status);
           cache = { t: 0, data: null }; // 立刻刷新缓存
-          const top50 = await cloudTop(50);
-          const idx = top50.findIndex((row) => row.name === name && row.score === Math.floor(score));
+          if (endpoint) {
+            const { rank } = await r.json();
+            return { ok: true, cloud: true, rank };
+          }
+          // The insert has succeeded even if the follow-up rank lookup is offline.
+          const top50 = await cloudTop(50).catch(() => []);
+          const idx = top50.findIndex((row) => row.id === id);
           return { ok: true, cloud: true, rank: idx >= 0 ? idx + 1 : null };
         } catch (e) {
           // 云端失败 → 本地兜底

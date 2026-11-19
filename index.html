@@ -272,6 +272,7 @@ body {
   <div id="toast" hidden></div>
   <div id="loading">正在生成雪山…</div>
 </div>
+<!-- snowline-local-config -->
 <script>
 /**
  * @license
@@ -292,8 +293,10 @@ body {
 // 配置后 = 全部玩家共享全球排行榜。anon key 是设计为公开的密钥，权限被数据库策略锁死，可以安全出现在前端代码里。
 // 详细步骤见 README.md。
 window.SKI_CONFIG = {
+  LEADERBOARD_URL: '',    // 自建排行榜 HTTPS 接口，例如 https://scores.example.com/api/scores
+  LEADERBOARD_RULESET: 'snowline-v1',
   SUPABASE_URL: '',        // 例如 'https://abcd1234.supabase.co'
-  SUPABASE_ANON_KEY: '',   // 项目 Settings → API 里的 anon public key
+  SUPABASE_PUBLISHABLE_KEY: '', // 项目的公开密钥 sb_publishable_…，也支持旧 anon public key
 };
 
 // 引擎调参（同一构建作用域内的全局常量）
@@ -320,6 +323,7 @@ const CFG = {
   TURN_SPEED_DAMP: 0.026,  // 转向随速度衰减（高速转弯半径变大，但保持可躲树）
   GRIP: 6.5,               // 速度方向贴合雪板朝向的速率（抓地）
   STEER_SMOOTH: 12,        // 输入平滑
+  RECENTER_RATE: 2.6,      // 松开方向后，航向向下坡回正的速率（1/s）
   STEER_EXP: 1.2,          // 摇杆曲线（中心更细腻）
   EDGE_LAT: 0.42,         // 立刃产生的侧向引导加速度因子
 
@@ -1893,7 +1897,10 @@ function makePhysics(seed) {
     const v = st.speed;
     const omegaMax = CFG.TURN_RATE / (1 + v * CFG.TURN_SPEED_DAMP);
     const omegaByGrip = 34 / Math.max(v, 2); // 侧向抓地上限（保证 25m/s 时半径 ~18m，可躲树）
-    const omega = -st.steer * Math.min(omegaMax, omegaByGrip);
+    const turnLimit = Math.min(omegaMax, omegaByGrip);
+    // 松手后逐渐朝下坡回正，仍受当前速度的抓地上限约束。
+    const recenter = U.clamp(-st.heading * CFG.RECENTER_RATE, -turnLimit, turnLimit);
+    const omega = -st.steer * turnLimit + recenter * (1 - Math.abs(st.steer));
     st.heading += omega * dt;
     st.heading = U.clamp(st.heading, -1.35, 1.35); // 不许倒滑/横穿上山
     st.latA = v * omega;
@@ -1986,45 +1993,47 @@ function makePhysics(seed) {
 
 // ---- 输入：鼠标 / 触控 / 键盘统一 ----
 function makeInput(el) {
-  const inp = {
-    steer: 0,
-    active: false,
-    _key: 0,
-    _ptrX: null,
-  };
+  const inp = { steer: 0 };
+  const held = [];
+  const directions = new Map([['arrowleft', -1], ['a', -1], ['arrowright', 1], ['d', 1]]);
+  let pointerX = null;
   function curve(x) {
     if (Math.abs(x) < 0.035) return 0;
     const c = Math.sign(x) * Math.pow(Math.abs(x), CFG.STEER_EXP);
     return U.clamp(c * 1.18, -1, 1);
   }
   function update() {
-    if (inp._key !== 0) { inp.steer = inp._key; inp.active = true; return; }
-    if (inp._ptrX === null) { inp.steer = 0; return; }
-    inp.steer = curve(inp._ptrX * 2 - 1);  // 0..1 → -1..1
-    inp.active = true;
+    if (held.length) inp.steer = directions.get(held[held.length - 1]);
+    else inp.steer = pointerX === null ? 0 : curve(pointerX * 2 - 1);
   }
 
-  el.addEventListener('mousemove', (e) => { inp._ptrX = e.clientX / window.innerWidth; }, { passive: true });
-  el.addEventListener('mouseleave', () => { inp._ptrX = null; });
-  // 触控：按住时以触点横坐标控制（绝对位置，直觉）
-  el.addEventListener('touchstart', (e) => {
-    inp._ptrX = e.touches[0].clientX / window.innerWidth;
+  el.addEventListener('mousemove', (e) => {
+    if (!held.length && !e.sourceCapabilities?.firesTouchEvents) pointerX = e.clientX / window.innerWidth;
   }, { passive: true });
+  el.addEventListener('mouseleave', () => { pointerX = null; });
+  function readTouch(e) {
+    pointerX = e.touches.length ? e.touches[0].clientX / window.innerWidth : null;
+  }
+  el.addEventListener('touchstart', readTouch, { passive: true });
   el.addEventListener('touchmove', (e) => {
-    inp._ptrX = e.touches[0].clientX / window.innerWidth;
+    readTouch(e);
     e.preventDefault();
   }, { passive: false });
-  el.addEventListener('touchend', () => { inp._ptrX = null; }, { passive: true });
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') inp._key = -1;
-    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') inp._key = 1;
+  el.addEventListener('touchend', readTouch, { passive: true });
+  el.addEventListener('touchcancel', readTouch, { passive: true });
+  el.addEventListener('keydown', (e) => {
+    const key = e.key.toLowerCase();
+    if (directions.has(key) && !e.repeat && !held.includes(key)) {
+      held.push(key);
+      pointerX = null;
+    }
   });
-  window.addEventListener('keyup', (e) => {
-    if (['ArrowLeft', 'a', 'A', 'ArrowRight', 'd', 'D'].includes(e.key)) inp._key = 0;
+  el.addEventListener('keyup', (e) => {
+    const index = held.indexOf(e.key.toLowerCase());
+    if (index >= 0) held.splice(index, 1);
   });
-  inp.reset = () => { inp._ptrX = null; inp._key = 0; inp.steer = 0; };
+  inp.reset = () => { pointerX = null; held.length = 0; inp.steer = 0; };
   el.addEventListener('blur', inp.reset);
-  el.addEventListener('touchcancel', inp.reset);
   inp.update = update;
   return inp;
 }
@@ -2330,26 +2339,37 @@ function makeSfx() {
 
 /* ================= leaderboard.js ================= */
 /* ================= leaderboard.js ================= */
-// 排行榜双模式：配置了 Supabase = 全球共享；否则 localStorage 本机榜
+// 排行榜支持自建服务、Supabase 和浏览器本机记录。
 'use strict';
 
 function sanitizeName(raw) {
   return String(raw || '')
-    .replace(/[<>&"'`\\/\x00-\x1f]/g, '')
+    .replace(/[<>&"'`\\/\x00-\x1f\x7f]/g, '')
     .trim()
     .slice(0, 16);
 }
 
 function makeLeaderboard() {
-  const cfg = (typeof window !== 'undefined' && window.SKI_CONFIG) || {};
+  const browser = typeof window !== 'undefined' ? window : {};
+  const cfg = browser.SKI_CONFIG || {};
+  const selfHosted = browser.SKI_LOCAL_LEADERBOARD || cfg.LEADERBOARD_URL;
+  const endpoint = selfHosted ? new URL(selfHosted, browser.location.href) : null;
+  const apiHeaders = { Accept: 'application/json' };
+  if (endpoint) {
+    endpoint.searchParams.set('ruleset', cfg.LEADERBOARD_RULESET || 'snowline-v1');
+    if (/\.(ngrok-free\.(app|dev)|ngrok\.io)$/.test(endpoint.hostname)) {
+      apiHeaders['ngrok-skip-browser-warning'] = '1';
+    }
+  }
   const URL_BASE = (cfg.SUPABASE_URL || '').replace(/\/+$/, '');
-  const KEY = cfg.SUPABASE_ANON_KEY || '';
-  const isCloud = !!(URL_BASE && KEY);
+  const KEY = cfg.SUPABASE_PUBLISHABLE_KEY || cfg.SUPABASE_ANON_KEY || '';
+  const isCloud = !!(endpoint || (URL_BASE && KEY));
   const HEADERS = {
     'apikey': KEY,
-    'Authorization': 'Bearer ' + KEY,
     'Content-Type': 'application/json',
   };
+  // Legacy anon keys are JWTs. Publishable keys belong only in apikey.
+  if (KEY.startsWith('eyJ')) HEADERS.Authorization = 'Bearer ' + KEY;
 
   // ---- 本地模式 ----
   function localBoard() {
@@ -2367,10 +2387,8 @@ function makeLeaderboard() {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 12000);
     try {
-      const r = await fetch(
-        `${URL_BASE}/rest/v1/scores?select=name,score&order=score.desc&limit=50`,
-        { headers: HEADERS, signal: ctrl.signal }
-      );
+      const url = endpoint || `${URL_BASE}/rest/v1/scores?select=id,name,score&order=score.desc,created_at.asc,id.asc&limit=50`;
+      const r = await fetch(url, { headers: endpoint ? apiHeaders : HEADERS, signal: ctrl.signal });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const rows = await r.json();
       cache = { t: Date.now(), data: rows };
@@ -2379,7 +2397,7 @@ function makeLeaderboard() {
   }
 
   return {
-    mode: isCloud ? 'cloud' : 'local',
+    mode: endpoint ? 'self-hosted' : isCloud ? 'cloud' : 'local',
     isCloud,
 
     async top(n) {
@@ -2387,7 +2405,7 @@ function makeLeaderboard() {
       if (isCloud) {
         try { return await cloudTop(n); }
         catch (e) {
-          return [{ name: '(云端暂不可达)', score: 0, offline: true }];
+          return [{ offline: true }, ...localBoard().slice(0, n)];
         }
       }
       return localBoard().slice(0, n);
@@ -2399,16 +2417,25 @@ function makeLeaderboard() {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 12000);
         try {
-          const r = await fetch(`${URL_BASE}/rest/v1/scores`, {
+          const id = crypto.randomUUID();
+          const r = await fetch(endpoint || `${URL_BASE}/rest/v1/scores`, {
             method: 'POST',
-            headers: Object.assign({}, HEADERS, { 'Prefer': 'return=minimal' }),
-            body: JSON.stringify({ name, score: Math.floor(score) }),
+            headers: endpoint ? { ...apiHeaders, 'Content-Type': 'application/json' }
+              : { ...HEADERS, 'Prefer': 'return=minimal' },
+            body: JSON.stringify(endpoint
+              ? { name, score: Math.floor(score), runId: id }
+              : { id, name, score: Math.floor(score) }),
             signal: ctrl.signal,
           });
           if (!r.ok && r.status !== 201) throw new Error('HTTP ' + r.status);
           cache = { t: 0, data: null }; // 立刻刷新缓存
-          const top50 = await cloudTop(50);
-          const idx = top50.findIndex((row) => row.name === name && row.score === Math.floor(score));
+          if (endpoint) {
+            const { rank } = await r.json();
+            return { ok: true, cloud: true, rank };
+          }
+          // The insert has succeeded even if the follow-up rank lookup is offline.
+          const top50 = await cloudTop(50).catch(() => []);
+          const idx = top50.findIndex((row) => row.id === id);
           return { ok: true, cloud: true, rank: idx >= 0 ? idx + 1 : null };
         } catch (e) {
           // 云端失败 → 本地兜底
@@ -2494,6 +2521,11 @@ function makeUI(handlers) {
     el.boardList.innerHTML = '<div class="board-loading">加载中…</div>';
     handlers.onBoard().then((rows) => {
       if (el.board.hidden) return;
+      if (rows[0]?.offline) {
+        el.boardMode.textContent = '服务暂不可达 · 本机记录';
+        renderBoard(rows.slice(1));
+        return;
+      }
       renderBoard(rows);
     });
   }
@@ -2641,7 +2673,10 @@ function makeUI(handlers) {
     onMute() { sfx.setMuted(!sfx.muted); ui.setMuteIcon(sfx.muted); },
     onPause() { if (state === 'RUN') togglePause(true); },
     async onBoard() { return board.top(50); },
-    boardModeText() { return board.isCloud ? '☁ 全球共享' : '💾 本机记录（未配置云端）'; },
+    boardModeText() {
+      if (board.mode === 'self-hosted') return '共享排行榜';
+      return board.isCloud ? '☁ 全球共享' : '💾 本机记录（未配置共享榜）';
+    },
   });
   ui.bind();
   ui.setMuteIcon(sfx.muted);
@@ -2769,9 +2804,10 @@ function makeUI(handlers) {
     const submittingRun = runId;
     const res = await board.submit(name, score);
     if (submittingRun !== runId || state !== 'OVER') return;
-    if (res.ok && res.cloud && res.rank) ui.setRank(`全球第 ${res.rank} 名`);
+    if (res.ok && res.cloud && res.rank) ui.setRank(`排行榜第 ${res.rank} 名`);
+    else if (res.ok && res.cloud) ui.setRank('已提交到共享排行榜');
     else if (res.ok && !res.cloud) ui.setRank('已记入本机排行榜');
-    else if (!res.ok && res.cloud) ui.setRank('云端暂不可达，成绩已存本机');
+    else if (!res.ok && res.cloud) ui.setRank('提交未确认，成绩已存本机');
   }
 
   // ---- 碰撞 & 擦树 ----

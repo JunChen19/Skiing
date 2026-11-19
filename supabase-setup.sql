@@ -1,7 +1,6 @@
 -- 雪线 SNOWLINE — 全球共享排行榜建表脚本
 -- 用法：Supabase 控制台 → SQL Editor → 粘贴本文件全部内容 → Run
--- 然后到 Settings → API 复制 Project URL 和 anon public key，
--- 填入 index.html 顶部的 window.SKI_CONFIG（或 src/config.js 后重新 node build.js）
+-- 将 Project URL 和 publishable key 填入 src/config.js，然后运行 node build.js。
 
 create table if not exists public.scores (
   id         uuid primary key default gen_random_uuid(),
@@ -17,6 +16,11 @@ create table if not exists public.scores (
 create index if not exists scores_score_desc_idx on public.scores (score desc);
 
 alter table public.scores enable row level security;
+
+-- 显式授权，兼容未自动开放 public 表的新项目。
+revoke all on table public.scores from public, anon, authenticated;
+grant select on table public.scores to anon, authenticated;
+grant insert (id, name, score) on table public.scores to anon, authenticated;
 
 -- 任何人可读（排行榜展示）
 drop policy if exists "scores_select_anon" on public.scores;

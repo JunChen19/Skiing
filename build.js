@@ -121,6 +121,7 @@ ${css}
   <div id="toast" hidden></div>
   <div id="loading">正在生成雪山…</div>
 </div>
+<!-- snowline-local-config -->
 <script>
 ${three}
 </script>

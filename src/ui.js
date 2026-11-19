@@ -50,6 +50,11 @@ function makeUI(handlers) {
     el.boardList.innerHTML = '<div class="board-loading">加载中…</div>';
     handlers.onBoard().then((rows) => {
       if (el.board.hidden) return;
+      if (rows[0]?.offline) {
+        el.boardMode.textContent = '服务暂不可达 · 本机记录';
+        renderBoard(rows.slice(1));
+        return;
+      }
       renderBoard(rows);
     });
   }

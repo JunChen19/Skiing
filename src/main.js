@@ -67,7 +67,10 @@
     onMute() { sfx.setMuted(!sfx.muted); ui.setMuteIcon(sfx.muted); },
     onPause() { if (state === 'RUN') togglePause(true); },
     async onBoard() { return board.top(50); },
-    boardModeText() { return board.isCloud ? '☁ 全球共享' : '💾 本机记录（未配置云端）'; },
+    boardModeText() {
+      if (board.mode === 'self-hosted') return '共享排行榜';
+      return board.isCloud ? '☁ 全球共享' : '💾 本机记录（未配置共享榜）';
+    },
   });
   ui.bind();
   ui.setMuteIcon(sfx.muted);
@@ -195,9 +198,10 @@
     const submittingRun = runId;
     const res = await board.submit(name, score);
     if (submittingRun !== runId || state !== 'OVER') return;
-    if (res.ok && res.cloud && res.rank) ui.setRank(`全球第 ${res.rank} 名`);
+    if (res.ok && res.cloud && res.rank) ui.setRank(`排行榜第 ${res.rank} 名`);
+    else if (res.ok && res.cloud) ui.setRank('已提交到共享排行榜');
     else if (res.ok && !res.cloud) ui.setRank('已记入本机排行榜');
-    else if (!res.ok && res.cloud) ui.setRank('云端暂不可达，成绩已存本机');
+    else if (!res.ok && res.cloud) ui.setRank('提交未确认，成绩已存本机');
   }
 
   // ---- 碰撞 & 擦树 ----

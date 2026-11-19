@@ -4,8 +4,10 @@
 // 配置后 = 全部玩家共享全球排行榜。anon key 是设计为公开的密钥，权限被数据库策略锁死，可以安全出现在前端代码里。
 // 详细步骤见 README.md。
 window.SKI_CONFIG = {
+  LEADERBOARD_URL: '',    // 自建排行榜 HTTPS 接口，例如 https://scores.example.com/api/scores
+  LEADERBOARD_RULESET: 'snowline-v1',
   SUPABASE_URL: '',        // 例如 'https://abcd1234.supabase.co'
-  SUPABASE_ANON_KEY: '',   // 项目 Settings → API 里的 anon public key
+  SUPABASE_PUBLISHABLE_KEY: '', // 项目的公开密钥 sb_publishable_…，也支持旧 anon public key
 };
 
 // 引擎调参（同一构建作用域内的全局常量）
@@ -32,6 +34,7 @@ const CFG = {
   TURN_SPEED_DAMP: 0.026,  // 转向随速度衰减（高速转弯半径变大，但保持可躲树）
   GRIP: 6.5,               // 速度方向贴合雪板朝向的速率（抓地）
   STEER_SMOOTH: 12,        // 输入平滑
+  RECENTER_RATE: 2.6,      // 松开方向后，航向向下坡回正的速率（1/s）
   STEER_EXP: 1.2,          // 摇杆曲线（中心更细腻）
   EDGE_LAT: 0.42,         // 立刃产生的侧向引导加速度因子
 
